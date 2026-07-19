@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import '../models/database_helper.dart';
+import 'sales_terminal_screen.dart'; // Importación necesaria para la navegación
 
 class InventoryScreen extends StatefulWidget {
-  const InventoryScreen({Key? key}) : super(key: key);
+  final String userRole; 
+
+  const InventoryScreen({Key? key, required this.userRole}) : super(key: key);
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();
@@ -10,16 +13,17 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen> {
   List<Map<String, dynamic>> _products = [];
+  bool _isLoading = true;
 
-  final TextEditingController _codeController = TextEditingController();
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _priceController = TextEditingController();
-  final TextEditingController _stockController = TextEditingController();
+  final _codeController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _priceController = TextEditingController();
+  final _stockController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _loadInventory();
+    _refreshInventory();
   }
 
   @override
@@ -31,14 +35,31 @@ class _InventoryScreenState extends State<InventoryScreen> {
     super.dispose();
   }
 
-  Future<void> _loadInventory() async {
+  Future<void> _refreshInventory() async {
+    setState(() => _isLoading = true);
     final data = await DatabaseHelper.instance.getProducts();
     setState(() {
       _products = data;
+      _isLoading = false;
     });
   }
 
+  void _showSnackBar(String message, Color backgroundColor) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: backgroundColor,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   void _showAddProductDialog() {
+    if (widget.userRole != 'Administrador' && widget.userRole != 'admin') {
+      _showSnackBar('⚠️ Acceso denegado: Solo los Administradores pueden registrar productos.', Colors.red);
+      return;
+    }
+
     _codeController.clear();
     _nameController.clear();
     _priceController.clear();
@@ -47,32 +68,28 @@ class _InventoryScreenState extends State<InventoryScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Agregar Nuevo Producto', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF232D37))),
+        title: const Text('Añadir Nuevo Producto'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: _codeController,
-                decoration: const InputDecoration(labelText: 'Código de Barras / Único', prefixIcon: Icon(Icons.qr_code)),
+                decoration: const InputDecoration(labelText: 'Código de Barras'),
               ),
-              const SizedBox(height: 10),
               TextField(
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Nombre del Producto', prefixIcon: Icon(Icons.shopping_bag)),
+                decoration: const InputDecoration(labelText: 'Nombre del Producto'),
               ),
-              const SizedBox(height: 10),
               TextField(
                 controller: _priceController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Precio de Venta (\$)', prefixIcon: Icon(Icons.attach_money)),
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Precio'),
               ),
-              const SizedBox(height: 10),
               TextField(
                 controller: _stockController,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Cantidad en Stock Inicial', prefixIcon: Icon(Icons.unarchive)),
+                decoration: const InputDecoration(labelText: 'Stock Inicial'),
               ),
             ],
           ),
@@ -80,43 +97,132 @@ class _InventoryScreenState extends State<InventoryScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+            child: const Text('Cancelar'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF232D37)),
             onPressed: () async {
-              if (_codeController.text.isEmpty || _nameController.text.isEmpty || _priceController.text.isEmpty || _stockController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Por favor, rellena todos los campos.'))
-                );
-                return;
-              }
+              if (_codeController.text.isEmpty || _nameController.text.isEmpty) return;
+              
+              final newProduct = {
+                'code': _codeController.text.trim(),
+                'name': _nameController.text.trim(),
+                'price': double.tryParse(_priceController.text) ?? 0.0,
+                'stock': int.tryParse(_stockController.text) ?? 0,
+              };
 
               try {
-                final db = await DatabaseHelper.instance.database;
-                await db.insert('products', {
-                  'code': _codeController.text.trim(),
-                  'name': _nameController.text.trim(),
-                  'price': double.parse(_priceController.text.trim()),
-                  'stock': int.parse(_stockController.text.trim()),
-                });
-
-                if (mounted) {
-                  Navigator.pop(context);
-                  _loadInventory();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Producto guardado exitosamente.'))
-                  );
-                }
+                Navigator.pop(context);
+                await DatabaseHelper.instance.insertProduct(newProduct);
+                _showSnackBar('¡Producto guardado exitosamente!', Colors.green);
               } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error al guardar en la base de datos: $e'))
-                  );
-                }
+                _showSnackBar('❌ Error al guardar: No tienes permisos o la clave es inválida.', Colors.red);
               }
+              
+              if (!mounted) return;
+              _refreshInventory();
             },
-            child: const Text('Guardar Producto', style: TextStyle(color: Colors.white)),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditDialog(Map<String, dynamic> product) {
+    if (widget.userRole != 'Administrador' && widget.userRole != 'admin') {
+      _showSnackBar('⚠️ Acceso denegado: Solo los Administradores pueden editar productos.', Colors.red);
+      return;
+    }
+
+    final nameEdit = TextEditingController(text: product['name'].toString());
+    final priceEdit = TextEditingController(text: product['price'].toString());
+    final stockEdit = TextEditingController(text: product['stock'].toString());
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Editar ${product['name']}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameEdit,
+              decoration: const InputDecoration(labelText: 'Nombre del Producto'),
+            ),
+            TextField(
+              controller: priceEdit,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Precio'),
+            ),
+            TextField(
+              controller: stockEdit,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Stock en Existencia'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final updatedProduct = {
+                'code': product['code'].toString(), 
+                'name': nameEdit.text.trim(),
+                'price': double.tryParse(priceEdit.text) ?? product['price'],
+                'stock': int.tryParse(stockEdit.text) ?? product['stock'],
+              };
+              
+              try {
+                Navigator.pop(context);
+                await DatabaseHelper.instance.updateProduct(updatedProduct);
+                _showSnackBar('¡Producto actualizado correctamente!', Colors.green);
+              } catch (e) {
+                _showSnackBar('❌ Error al actualizar: Acción no autorizada por el servidor.', Colors.red);
+              }
+              
+              if (!mounted) return;
+              _refreshInventory();
+            },
+            child: const Text('Actualizar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDelete(String code) {
+    if (widget.userRole != 'Administrador' && widget.userRole != 'admin') {
+      _showSnackBar('⚠️ Acceso denegado: Solo los Administradores pueden eliminar productos.', Colors.red);
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('¿Eliminar producto?'),
+        content: const Text('Esta acción quitará el producto del inventario local y de Supabase.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () async {
+              try {
+                Navigator.pop(context);
+                await DatabaseHelper.instance.deleteProduct(code);
+                _showSnackBar('Producto eliminado con éxito.', Colors.blue);
+              } catch (e) {
+                _showSnackBar('❌ Error al eliminar: Acción rejected.', Colors.red);
+              }
+              
+              if (!mounted) return;
+              _refreshInventory();
+            },
+            child: const Text('Eliminar', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -126,11 +232,26 @@ class _InventoryScreenState extends State<InventoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
       appBar: AppBar(
         title: const Text('Control de Inventario', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF232D37),
+        backgroundColor: const Color(0xFF2C3E50),
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          // BOTÓN AGREGADO: Permite alternar a la terminal pasando el rol para solucionar el error de compilación
+          TextButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => SalesTerminalScreen(userRole: widget.userRole),
+                ),
+              );
+            },
+            icon: const Icon(Icons.point_of_sale, color: Colors.greenAccent),
+            label: const Text('Terminal de Ventas', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(width: 15),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -140,57 +261,81 @@ class _InventoryScreenState extends State<InventoryScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Productos en Existencia', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF232D37))),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF232D37), foregroundColor: Colors.white),
-                  onPressed: _showAddProductDialog,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Nuevo Producto'),
+                const Text(
+                  'Productos en Existencia',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50)),
                 ),
+                if (widget.userRole == 'Administrador' || widget.userRole == 'admin')
+                  ElevatedButton.icon(
+                    onPressed: _showAddProductDialog,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Nuevo Producto'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2C3E50),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
               ],
             ),
-            const SizedBox(height: 15),
+            const SizedBox(height: 20),
             Expanded(
-              child: Card(
-                elevation: 2,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: _products.isEmpty
-                    ? const Center(child: Text('No hay productos registrados.'))
-                    : ListView.separated(
-                        itemCount: _products.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final p = _products[index];
-                          final int stock = p['stock'] ?? 0;
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: const Color(0xFF232D37).withOpacity(0.1),
-                              child: const Icon(Icons.inventory_2, color: Color(0xFF232D37)),
-                            ),
-                            title: Text(p['name'] ?? 'Sin nombre', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('Código: ${p['code'] ?? 'N/A'}'),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text('\$${(p['price'] ?? 0.0).toStringAsFixed(2)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16)),
-                                const SizedBox(width: 30),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _products.isEmpty
+                      ? const Center(child: Text('No hay productos registrados.'))
+                      : ListView.builder(
+                          itemCount: _products.length,
+                          itemBuilder: (context, index) {
+                            final product = _products[index];
+                            final double price = ((product['price'] ?? 0.0) as num).toDouble();
+                            
+                            return Card(
+                              elevation: 2,
+                              margin: const EdgeInsets.symmetric(vertical: 6),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                leading: Container(
+                                  padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    color: stock < 5 ? Colors.red[50] : Colors.green[50],
-                                    borderRadius: BorderRadius.circular(20),
+                                    color: const Color(0xFFF0F3F4),
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Text(
-                                    'Stock: $stock',
-                                    style: TextStyle(color: stock < 5 ? Colors.red[700] : Colors.green[700], fontWeight: FontWeight.bold),
-                                  ),
+                                  child: const Icon(Icons.archive, color: Color(0xFF2C3E50)),
                                 ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
+                                title: Text(
+                                  product['name']?.toString() ?? 'Sin nombre',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                ),
+                                subtitle: Text(
+                                  'Código: ${product['code']}\nStock: ${product['stock']}',
+                                  style: const TextStyle(height: 1.3),
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '\$${price.toStringAsFixed(2)}',
+                                      style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    if (widget.userRole == 'Administrador' || widget.userRole == 'admin') ...[
+                                      IconButton(
+                                        icon: const Icon(Icons.edit, color: Colors.blue),
+                                        onPressed: () => _showEditDialog(product),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete, color: Colors.red),
+                                        onPressed: () => _confirmDelete(product['code'].toString()),
+                                      ),
+                                    ]
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
             ),
           ],
         ),
