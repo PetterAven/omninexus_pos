@@ -329,15 +329,9 @@ class DatabaseHelper {
     return await db.insert('users', userData, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  // Mantenemos este alias por compatibilidad si lo llamabas desde otras partes
-  Future<int> createUser(String username, String password, String role) async {
-    return await registerUser(
-      currentOperatorRole: 'Administrador', // Bypass por defecto para migraciones iniciales
-      newUsername: username,
-      newPassword: password,
-      newRole: role,
-    );
-  }
+  // 🛡️ Se eliminó el alias createUser(): siempre bypasseaba la validación de rol
+  // ("Administrador" a fuerzas) sin importar quién lo llamara. Toda creación de
+  // cuentas debe pasar por registerUser() con el rol real de quien tiene la sesión.
 
   Future<int> deleteUser(String username) async {
     if (username == 'admin') return 0; // El administrador raíz es indestructible

@@ -48,69 +48,10 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _showRegisterDialog() {
-    final regUserCtrl = TextEditingController();
-    final regPassCtrl = TextEditingController();
-    String selectedRole = 'Cajero';
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Crear Nueva Cuenta', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: regUserCtrl,
-                decoration: const InputDecoration(labelText: 'Nombre de Usuario', prefixIcon: Icon(Icons.person)),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: regPassCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock)),
-              ),
-              const SizedBox(height: 15),
-              DropdownButtonFormField<String>(
-                value: selectedRole,
-                decoration: const InputDecoration(labelText: 'Rol del Usuario', prefixIcon: Icon(Icons.badge)),
-                items: const [
-                  DropdownMenuItem(value: 'Cajero', child: Text('Cajero')),
-                  DropdownMenuItem(value: 'Administrador', child: Text('Administrador')),
-                ],
-                onChanged: (val) {
-                  if (val != null) setDialogState(() => selectedRole = val);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF232D37)),
-              onPressed: () async {
-                if (regUserCtrl.text.isEmpty || regPassCtrl.text.isEmpty) return;
-                try {
-                  await DatabaseHelper.instance.createUser(regUserCtrl.text, regPassCtrl.text, selectedRole);
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Cuenta creada de forma exitosa.'))
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('El usuario ya existe.'))
-                  );
-                }
-              },
-              child: const Text('Registrar', style: TextStyle(color: Colors.white)),
-            )
-          ],
-        ),
-      ),
-    );
-  }
+  // 🛡️ El auto-registro público fue retirado por seguridad (Regla tipo Walmart):
+  // ningún usuario anónimo puede crear cuentas, y mucho menos elegir su propio rol.
+  // Las cuentas ahora solo se crean desde "Gestión de Personal", dentro del sistema,
+  // por un usuario que ya inició sesión con rol Administrador.
 
   @override
   Widget build(BuildContext context) {
@@ -152,9 +93,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
               const SizedBox(height: 15),
-              TextButton(
-                onPressed: _showRegisterDialog,
-                child: const Text('¿No tienes cuenta? Regístrate aquí', style: TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold)),
+              const Text(
+                '¿No tienes cuenta? Pídele a tu Administrador que la cree desde Gestión de Personal.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.blueGrey, fontSize: 12),
               )
             ],
           ),
