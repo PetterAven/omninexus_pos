@@ -38,10 +38,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Future<void> _refreshInventory() async {
     setState(() => _isLoading = true);
     final data = await DatabaseHelper.instance.getProducts();
+    if (!mounted) return;
     setState(() {
       _products = data;
       _isLoading = false;
     });
+
+    // CORREGIDO: si getProducts() no pudo sincronizar (red lenta/caída),
+    // avisamos aquí en vez de dejarlo silencioso.
+    if (!DatabaseHelper.instance.lastSyncOk && mounted) {
+      _showSnackBar('⚠️ No se pudo conectar con Supabase. Mostrando datos guardados en este equipo.', Colors.orange);
+    }
   }
 
   void _showSnackBar(String message, Color backgroundColor) {
@@ -102,9 +109,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ElevatedButton(
             onPressed: () async {
               if (_codeController.text.isEmpty || _nameController.text.isEmpty) return;
+
+              // CORREGIDO: si el código ya existe localmente, avisamos antes
+              // de intentar guardar, en vez de dejar que Supabase truene por
+              // llave duplicada sin explicación clara para el usuario.
+              final code = _codeController.text.trim();
+              final yaExiste = _products.any((p) => p['code'].toString() == code);
+              if (yaExiste) {
+                Navigator.pop(context);
+                _showSnackBar('❌ Ese código ya existe. Usa "Editar" en el producto o elige un código distinto.', Colors.red);
+                return;
+              }
               
               final newProduct = {
-                'code': _codeController.text.trim(),
+                'code': code,
                 'name': _nameController.text.trim(),
                 'price': double.tryParse(_priceController.text) ?? 0.0,
                 'stock': int.tryParse(_stockController.text) ?? 0,
@@ -113,9 +131,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
               try {
                 Navigator.pop(context);
                 await DatabaseHelper.instance.insertProduct(newProduct);
-                _showSnackBar('¡Producto guardado exitosamente!', Colors.green);
+                if (DatabaseHelper.instance.lastSyncOk) {
+                  _showSnackBar('¡Producto guardado y sincronizado con Supabase!', Colors.green);
+                } else {
+                  _showSnackBar('⚠️ Guardado solo en este equipo: no se pudo sincronizar con Supabase (revisa tu conexión).', Colors.orange);
+                }
               } catch (e) {
-                _showSnackBar('❌ Error al guardar: No tienes permisos o la clave es inválida.', Colors.red);
+                _showSnackBar('❌ Error al guardar: $e', Colors.red);
               }
               
               if (!mounted) return;
@@ -178,9 +200,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
               try {
                 Navigator.pop(context);
                 await DatabaseHelper.instance.updateProduct(updatedProduct);
-                _showSnackBar('¡Producto actualizado correctamente!', Colors.green);
+                if (DatabaseHelper.instance.lastSyncOk) {
+                  _showSnackBar('¡Producto actualizado y sincronizado con Supabase!', Colors.green);
+                } else {
+                  _showSnackBar('⚠️ Actualizado solo en este equipo: no se pudo sincronizar con Supabase.', Colors.orange);
+                }
               } catch (e) {
-                _showSnackBar('❌ Error al actualizar: Acción no autorizada por el servidor.', Colors.red);
+                _showSnackBar('❌ Error al actualizar: $e', Colors.red);
               }
               
               if (!mounted) return;
@@ -214,9 +240,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
               try {
                 Navigator.pop(context);
                 await DatabaseHelper.instance.deleteProduct(code);
-                _showSnackBar('Producto eliminado con éxito.', Colors.blue);
+                if (DatabaseHelper.instance.lastSyncOk) {
+                  _showSnackBar('Producto eliminado con éxito (local y Supabase).', Colors.blue);
+                } else {
+                  _showSnackBar('⚠️ Eliminado solo en este equipo: no se pudo sincronizar con Supabase.', Colors.orange);
+                }
               } catch (e) {
-                _showSnackBar('❌ Error al eliminar: Acción rejected.', Colors.red);
+                _showSnackBar('❌ Error al eliminar: $e', Colors.red);
               }
               
               if (!mounted) return;
@@ -237,7 +267,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
         backgroundColor: const Color(0xFF2C3E50),
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          // BOTÓN AGREGADO: Permite alternar a la terminal pasando el rol para solucionar el error de compilación
+          IconButton(
+            tooltip: 'Actualizar / reintentar sincronización',
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            onPressed: _refreshInventory,
+          ),
           TextButton.icon(
             onPressed: () {
               Navigator.push(

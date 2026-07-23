@@ -12,6 +12,17 @@ class DatabaseHelper {
 
   final _supabase = Supabase.instance.client;
 
+  // CORREGIDO: Tiempo máximo que esperamos una respuesta de Supabase antes de
+  // rendirnos y seguir en modo local. Sin esto, una red lenta o un firewall
+  // que descarta paquetes silenciosamente deja el "await" colgado para
+  // siempre, y eso es lo que se veía como "se queda cargando".
+  static const Duration _networkTimeout = Duration(seconds: 6);
+
+  // CORREGIDO: bandera pública para que las pantallas sepan si la última
+  // operación sí llegó a Supabase o solo se quedó en local. Antes esto solo
+  // se veía con debugPrint, que no existe en el .exe compilado.
+  bool lastSyncOk = true;
+
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDB('omninexus.db');
@@ -106,7 +117,11 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getProducts() async {
     try {
-      final cloudProducts = await _supabase.from('products').select();
+      final cloudProducts = await _supabase
+          .from('products')
+          .select()
+          .timeout(_networkTimeout);
+
       if (cloudProducts.isNotEmpty) {
         final db = await instance.database;
         for (var prod in cloudProducts) {
@@ -118,7 +133,9 @@ class DatabaseHelper {
           }, conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }
+      lastSyncOk = true;
     } catch (e) {
+      lastSyncOk = false;
       debugPrint("Modo Offline: Cargando productos locales. $e");
     }
 
@@ -133,9 +150,11 @@ class DatabaseHelper {
         'name': row['name'].toString(),
         'price': double.parse(row['price'].toString()),
         'stock': int.parse(row['stock'].toString()),
-      });
+      }).timeout(_networkTimeout);
+      lastSyncOk = true;
     } catch (e) {
-      debugPrint("Offline: Sincronización diferida para inserción.");
+      lastSyncOk = false;
+      debugPrint("Offline: Sincronización diferida para inserción. $e");
     }
 
     final db = await instance.database;
@@ -149,9 +168,11 @@ class DatabaseHelper {
         'name': row['name'].toString(),
         'price': double.parse(row['price'].toString()),
         'stock': int.parse(row['stock'].toString()),
-      }).eq('code', code);
+      }).eq('code', code).timeout(_networkTimeout);
+      lastSyncOk = true;
     } catch (e) {
-      debugPrint("Offline: Sincronización diferida para actualización.");
+      lastSyncOk = false;
+      debugPrint("Offline: Sincronización diferida para actualización. $e");
     }
 
     final db = await instance.database;
@@ -160,9 +181,11 @@ class DatabaseHelper {
 
   Future<int> deleteProduct(String code) async {
     try {
-      await _supabase.from('products').delete().eq('code', code);
+      await _supabase.from('products').delete().eq('code', code).timeout(_networkTimeout);
+      lastSyncOk = true;
     } catch (e) {
-      debugPrint("Offline: Sincronización diferida para eliminación.");
+      lastSyncOk = false;
+      debugPrint("Offline: Sincronización diferida para eliminación. $e");
     }
 
     final db = await instance.database;
@@ -190,33 +213,38 @@ class DatabaseHelper {
 
     // 1. Registrar venta en Supabase (Online)
     try {
-      final insertedSale = await _supabase.from('sales').insert({
-        'total': total,
-        'date': isoDate,
-      }).select().single();
-      
+      final insertedSale = await _supabase
+          .from('sales')
+          .insert({
+            'total': total,
+            'date': isoDate,
+          })
+          .select()
+          .single()
+          .timeout(_networkTimeout);
+
       finalSaleId = insertedSale['id'] as int;
 
-      if (finalSaleId != null) {
-        for (var item in cartItems) {
-          await _supabase.from('sale_details').insert({
-            'sale_id': finalSaleId,
-            'product_code': item['code'].toString(),
-            'product_name': item['name'].toString(),
-            'price': double.parse(item['price'].toString()),
-            'quantity': int.parse(item['quantity'].toString()),
-          });
+      for (var item in cartItems) {
+        await _supabase.from('sale_details').insert({
+          'sale_id': finalSaleId,
+          'product_code': item['code'].toString(),
+          'product_name': item['name'].toString(),
+          'price': double.parse(item['price'].toString()),
+          'quantity': int.parse(item['quantity'].toString()),
+        }).timeout(_networkTimeout);
 
-          // Disparador de decremento atómico seguro contra condiciones de carrera
-          try {
-             await _supabase.rpc('decrement_stock', params: {
-               'row_code': item['code'].toString(),
-               'quantity_to_sub': int.parse(item['quantity'].toString())
-             });
-          } catch(_) {}
-        }
+        // Disparador de decremento atómico seguro contra condiciones de carrera
+        try {
+          await _supabase.rpc('decrement_stock', params: {
+            'row_code': item['code'].toString(),
+            'quantity_to_sub': int.parse(item['quantity'].toString())
+          }).timeout(_networkTimeout);
+        } catch (_) {}
       }
+      lastSyncOk = true;
     } catch (e) {
+      lastSyncOk = false;
       debugPrint("Venta guardada en búfer local (Pendiente de sincronizar): $e");
     }
 
@@ -252,7 +280,7 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getUsers() async {
     try {
-      final cloudUsers = await _supabase.from('users').select();
+      final cloudUsers = await _supabase.from('users').select().timeout(_networkTimeout);
       if (cloudUsers.isNotEmpty) {
         final db = await instance.database;
         for (var user in cloudUsers) {
@@ -272,8 +300,9 @@ class DatabaseHelper {
           .select()
           .eq('username', username)
           .eq('password', password)
-          .maybeSingle();
-      
+          .maybeSingle()
+          .timeout(_networkTimeout);
+
       if (cloudUser != null) return cloudUser;
     } catch (_) {}
 
@@ -307,10 +336,12 @@ class DatabaseHelper {
     };
 
     // Subir a la nube primero
+    bool syncedToCloud = true;
     try {
-      await _supabase.from('users').insert(userData);
+      await _supabase.from('users').insert(userData).timeout(_networkTimeout);
     } catch (e) {
-      debugPrint("Servidor inaccesible. Creando registro local temporal.");
+      syncedToCloud = false;
+      debugPrint("Servidor inaccesible. Creando registro local temporal. $e");
     }
 
     final db = await instance.database;
@@ -326,17 +357,15 @@ class DatabaseHelper {
       throw Exception('El identificador de usuario ya se encuentra registrado.');
     }
 
-    return await db.insert('users', userData, conflictAlgorithm: ConflictAlgorithm.replace);
+    final result = await db.insert('users', userData, conflictAlgorithm: ConflictAlgorithm.replace);
+    lastSyncOk = syncedToCloud;
+    return result;
   }
-
-  // 🛡️ Se eliminó el alias createUser(): siempre bypasseaba la validación de rol
-  // ("Administrador" a fuerzas) sin importar quién lo llamara. Toda creación de
-  // cuentas debe pasar por registerUser() con el rol real de quien tiene la sesión.
 
   Future<int> deleteUser(String username) async {
     if (username == 'admin') return 0; // El administrador raíz es indestructible
     try {
-      await _supabase.from('users').delete().eq('username', username);
+      await _supabase.from('users').delete().eq('username', username).timeout(_networkTimeout);
     } catch (_) {}
     final db = await instance.database;
     return await db.delete('users', where: 'username = ?', whereArgs: [username]);

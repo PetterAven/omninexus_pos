@@ -338,6 +338,10 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
 
     try {
       final printers = await Printing.listPrinters();
+      if (printers.isEmpty) {
+        debugPrint('No se encontró ninguna impresora instalada en este equipo. Se omite la impresión física.');
+        return;
+      }
       final Printer thermalPrinter = printers.firstWhere(
         (printer) => 
           printer.name.toLowerCase().contains('pos') || 
@@ -589,7 +593,14 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                   await onCreated();
                   if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Cuenta creada de forma exitosa.')),
+                    SnackBar(
+                      content: Text(
+                        DatabaseHelper.instance.lastSyncOk
+                            ? 'Cuenta creada y sincronizada con Supabase.'
+                            : '⚠️ Cuenta creada solo en este equipo: no se pudo sincronizar con Supabase.',
+                      ),
+                      backgroundColor: DatabaseHelper.instance.lastSyncOk ? Colors.green : Colors.orange,
+                    ),
                   );
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -917,12 +928,21 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                         TextField(
                           controller: _cashController,
                           keyboardType: TextInputType.number,
+                          textInputAction: TextInputAction.done,
                           decoration: InputDecoration(
                             labelText: 'Monto Recibido',
                             prefixText: '\$ ',
                             errorText: _paymentErrorText,
                             border: const OutlineInputBorder(),
                           ),
+                          // CORREGIDO: Enter aquí registra el pago directo, sin tener que
+                          // soltar el teclado para hacer clic en el botón.
+                          onSubmitted: (_) {
+                            if (_total > 0) {
+                              double cash = double.tryParse(_cashController.text) ?? 0.0;
+                              _processLateralCheckout(cash);
+                            }
+                          },
                         ),
                         const SizedBox(height: 10),
                         Wrap(
