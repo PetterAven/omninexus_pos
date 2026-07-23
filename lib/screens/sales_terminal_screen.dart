@@ -20,8 +20,9 @@ class SalesTerminalScreen extends StatefulWidget {
 
 class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   final List<Map<String, dynamic>> _cart = [];
-  final SearchController _searchController = SearchController();
+  final TextEditingController _searchController = TextEditingController();
   final TextEditingController _cashController = TextEditingController();
+  List<Map<String, dynamic>> _searchSuggestions = [];
 
   double _total = 0.0;
   bool _isProcessingPayment = false;
@@ -116,6 +117,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
         });
       }
       _searchController.clear();
+      _searchSuggestions = [];
       _calculateTotal();
     });
   }
@@ -139,6 +141,8 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                 _paymentErrorText = null;
                 _linkedChatId = null;
                 _linkedUsername = null;
+                _searchController.clear();
+                _searchSuggestions = [];
               });
               Navigator.pop(context);
             },
@@ -149,15 +153,22 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     );
   }
 
+  Future<void> _onSearchChanged(String query) async {
+    if (query.trim().isEmpty) {
+      setState(() { _searchSuggestions = []; });
+      return;
+    }
+    final results = await DatabaseHelper.instance.searchProducts(query.trim());
+    if (!mounted) return;
+    setState(() { _searchSuggestions = results; });
+  }
+
   Future<void> _handleSearchSubmit(String query) async {
     if (query.trim().isEmpty) return;
     final results = await DatabaseHelper.instance.searchProducts(query.trim());
     if (!mounted) return;
     if (results.isNotEmpty) {
       _addProductToCart(results.first);
-      if (_searchController.isOpen) {
-        _searchController.closeView('');
-      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Producto no encontrado.'))
@@ -703,6 +714,28 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                                 ),
                               ),
                             ),
+                            const SizedBox(height: 10),
+                            Expanded(
+                              child: sales.isEmpty
+                                  ? const Center(child: Text('Aún no hay ventas registradas.', style: TextStyle(color: Colors.grey)))
+                                  : ListView.builder(
+                                      itemCount: sales.length,
+                                      itemBuilder: (context, index) {
+                                        final sale = sales[index];
+                                        final String fecha = (sale['date'] ?? '').toString();
+                                        final String fechaCorta = fecha.length >= 19 ? fecha.substring(0, 19) : fecha;
+                                        final double total = (sale['total'] ?? 0.0) is num
+                                            ? (sale['total'] as num).toDouble()
+                                            : double.tryParse(sale['total'].toString()) ?? 0.0;
+                                        return ListTile(
+                                          dense: true,
+                                          leading: Text('#${sale['id']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF232D37))),
+                                          title: Text(fechaCorta, style: const TextStyle(fontSize: 13)),
+                                          trailing: Text('\$${total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                                        );
+                                      },
+                                    ),
+                            ),
                           ],
                         ),
                         if (widget.userRole == 'Administrador' || widget.userRole == 'admin')
@@ -772,30 +805,53 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(12.0),
-                  child: SearchAnchor(
-                    searchController: _searchController,
-                    builder: (context, controller) {
-                      return SearchBar(
-                        controller: controller,
-                        hintText: 'Buscar producto por nombre o código...',
-                        leading: const Icon(Icons.search),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _searchController,
+                        onChanged: _onSearchChanged,
                         onSubmitted: _handleSearchSubmit,
-                      );
-                    },
-                    suggestionsBuilder: (context, controller) async {
-                      final results = await DatabaseHelper.instance.searchProducts(controller.text);
-                      return results.map((product) => ListTile(
-                        title: Text(product['name']),
-                        subtitle: Text('Código: ${product['code']} | Stock: ${product['stock']}'),
-                        trailing: Text('\$${product['price']}'),
-                        onTap: () {
-                          _addProductToCart(product);
-                          if (controller.isOpen) {
-                            controller.closeView('');
-                          }
-                        },
-                      ));
-                    },
+                        decoration: InputDecoration(
+                          hintText: 'Buscar producto por nombre o código...',
+                          prefixIcon: const Icon(Icons.search),
+                          filled: true,
+                          fillColor: Colors.grey[200],
+                          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(30),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                      if (_searchSuggestions.isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(top: 6),
+                          constraints: const BoxConstraints(maxHeight: 240),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 3)),
+                            ],
+                          ),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            padding: EdgeInsets.zero,
+                            itemCount: _searchSuggestions.length,
+                            itemBuilder: (context, index) {
+                              final product = _searchSuggestions[index];
+                              return ListTile(
+                                dense: true,
+                                title: Text(product['name'].toString()),
+                                subtitle: Text('Código: ${product['code']} | Stock: ${product['stock']}'),
+                                trailing: Text('\$${product['price']}'),
+                                onTap: () => _addProductToCart(product),
+                              );
+                            },
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 Expanded(
