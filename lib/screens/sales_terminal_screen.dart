@@ -152,9 +152,12 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   Future<void> _handleSearchSubmit(String query) async {
     if (query.trim().isEmpty) return;
     final results = await DatabaseHelper.instance.searchProducts(query.trim());
+    if (!mounted) return;
     if (results.isNotEmpty) {
       _addProductToCart(results.first);
-      _searchController.closeView('');
+      if (_searchController.isOpen) {
+        _searchController.closeView('');
+      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Producto no encontrado.'))
@@ -738,7 +741,10 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Terminal de Ventas - Modulo: ${widget.userRole ?? 'Cajero'}'),
+        title: Text(
+          'Terminal de Ventas - Modulo: ${widget.userRole ?? 'Cajero'}',
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: const Color(0xFF232D37),
         actions: [
           IconButton(
@@ -749,7 +755,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
           IconButton(
             icon: const Icon(Icons.inventory_2_outlined),
             tooltip: 'Inventario',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => InventoryScreen(userRole: widget.userRole))),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => InventoryScreen(userRole: widget.userRole ?? 'Cajero'))),
           ),
           TextButton.icon(
             icon: const Icon(Icons.telegram, color: Colors.white),
@@ -784,7 +790,9 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                         trailing: Text('\$${product['price']}'),
                         onTap: () {
                           _addProductToCart(product);
-                          controller.closeView('');
+                          if (controller.isOpen) {
+                            controller.closeView('');
+                          }
                         },
                       ));
                     },
