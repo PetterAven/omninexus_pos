@@ -1,13 +1,13 @@
 ﻿import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http; 
-import 'package:pdf/pdf.dart'; 
-import 'package:pdf/widgets.dart' as pw; 
-import 'package:printing/printing.dart'; 
+import 'package:http/http.dart' as http;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import '../models/database_helper.dart';
 import 'inventory_screen.dart';
 
 // Ruta ajustada para salir de 'screens' y entrar a 'widgets'
-import '../widgets/telegram_link_dialog.dart'; 
+import '../widgets/telegram_link_dialog.dart';
 
 class SalesTerminalScreen extends StatefulWidget {
   final String? userRole;
@@ -22,7 +22,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   final List<Map<String, dynamic>> _cart = [];
   final SearchController _searchController = SearchController();
   final TextEditingController _cashController = TextEditingController();
-  
+
   double _total = 0.0;
   bool _isProcessingPayment = false;
   String? _paymentErrorText;
@@ -32,24 +32,24 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   String? _linkedUsername;
 
   // ================= CREDENCIALES TELEGRAM =================
-  final String _telegramBotToken = '8903317057:AAEcJArqTDlU_EmTkhhbEyiyVLo1CzVcq4';
+  final String _telegramBotToken = '8903317057:AAEcJArqTDlU-_EmTKhhbEyiyVLo1CzVcq4';
   final String _telegramChatId = '8940573921';
 
   String _convertirTotalALetras(double cantidad) {
     int entero = cantidad.floor();
     if (entero == 0) return "CERO PESOS 00/100 M.N.";
-    
+
     final unidades = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE"];
     final decenas = ["", "DIEZ", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"];
     final especiales = ["ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE"];
-    
+
     String letras = "";
     if (entero >= 100) {
       if (entero == 100) letras += "CIEN ";
       else if (entero < 200) letras += "CIENTO ";
       entero %= 100;
     }
-    
+
     if (entero >= 11 && entero <= 19) {
       letras += especiales[entero - 11] + " ";
     } else {
@@ -64,7 +64,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
         letras += unidades[uni] + " ";
       }
     }
-    
+
     return "${letras.trim()} PESOS 00/100 M.N.";
   }
 
@@ -137,7 +137,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                 _isProcessingPayment = false;
                 _cashController.clear();
                 _paymentErrorText = null;
-                _linkedChatId = null; 
+                _linkedChatId = null;
                 _linkedUsername = null;
               });
               Navigator.pop(context);
@@ -166,7 +166,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     final Map<String, dynamic>? clienteVinculado = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => TelegramLinkDialog(), 
+      builder: (context) => TelegramLinkDialog(),
     );
 
     if (clienteVinculado != null) {
@@ -186,6 +186,10 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   }
 
   // ================= ENVIAR COMPROBANTE GENERAL (EFECTIVO O TARJETA) =================
+  // FIX: se quitó parse_mode 'Markdown' y todos los backticks/asteriscos/guiones bajos
+  // del texto. El Markdown "legacy" de Telegram truena con un 400 "can't parse entities"
+  // en cuanto hay un caracter especial suelto (por ejemplo en el nombre de un producto),
+  // y cuando eso pasa Telegram RECHAZA el mensaje completo: por eso no llegaba nada.
   Future<void> _sendTicketToTelegram(List<Map<String, dynamic>> items, double total, double received, double change, {bool isCard = false}) async {
     if (_telegramBotToken.startsWith('TU_')) return;
 
@@ -194,55 +198,73 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     int totalArticulos = items.fold(0, (sum, item) => sum + (item['quantity'] as int));
 
     final buffer = StringBuffer();
-    buffer.writeln('✳️ *WALMART EXPRESS - COMPROBANTE DE VENTA* ✳️');
-    buffer.writeln('`NUEVA WAL MART DE MEXICO S DE RL DE CV`');
-    buffer.writeln('`RFC: NWM9709244W4`');
-    buffer.writeln('`REGIMEN FISCAL - 601 GENERAL DE LEY`');
-    buffer.writeln('`--------------------------------------`');
-    buffer.writeln('📅 *FECHA:* ${DateTime.now().toString().substring(0, 19)}');
-    buffer.writeln('`TDA#3812  OP#00000254  TE# 079  TR# 02410`');
-    buffer.writeln('`--------------------------------------`');
-    
+    buffer.writeln('WALMART EXPRESS - COMPROBANTE DE VENTA');
+    buffer.writeln('NUEVA WAL MART DE MEXICO S DE RL DE CV');
+    buffer.writeln('RFC: NWM9709244W4');
+    buffer.writeln('REGIMEN FISCAL - 601 GENERAL DE LEY');
+    buffer.writeln('--------------------------------------');
+    buffer.writeln('FECHA: ${DateTime.now().toString().substring(0, 19)}');
+    buffer.writeln('TDA#3812  OP#00000254  TE# 079  TR# 02410');
+    buffer.writeln('--------------------------------------');
+
     for (var item in items) {
       double sub = (item['price'] ?? 0.0) * (item['quantity'] ?? 1);
-      buffer.writeln('`Código: ${item['code']}`');
-      buffer.writeln(' *${item['name'].toString().toUpperCase()}*');
-      buffer.writeln('  ${item['quantity']} X \$${(item['price'] ?? 0.0).toStringAsFixed(2)}   ->   *\$${sub.toStringAsFixed(2)}T*');
+      buffer.writeln('Código: ${item['code']}');
+      buffer.writeln(item['name'].toString().toUpperCase());
+      buffer.writeln('  ${item['quantity']} X \$${(item['price'] ?? 0.0).toStringAsFixed(2)}   ->   \$${sub.toStringAsFixed(2)}');
     }
-    
-    buffer.writeln('`--------------------------------------`');
-    buffer.writeln('💰 *TOTAL:* `\$${total.toStringAsFixed(2)}`');
+
+    buffer.writeln('--------------------------------------');
+    buffer.writeln('TOTAL: \$${total.toStringAsFixed(2)}');
     if (isCard) {
-      buffer.writeln('💳 *MÉTODO DE PAGO:* `TARJETA BANCARIA`');
+      buffer.writeln('MÉTODO DE PAGO: TARJETA BANCARIA');
     } else {
-      buffer.writeln('💵 *EFECTIVO:* `\$${received.toStringAsFixed(2)}`');
+      buffer.writeln('EFECTIVO: \$${received.toStringAsFixed(2)}');
     }
-    buffer.writeln('🔄 *CAMBIO:* `\$${change.toStringAsFixed(2)}`');
-    buffer.writeln('`--------------------------------------`');
-    buffer.writeln('🔤 _${_convertirTotalALetras(total)}_');
-    buffer.writeln('`--------------------------------------`');
-    buffer.writeln('📦 *ARTÍCULOS VENDIDOS:* `$totalArticulos`');
-    buffer.writeln('⚖️ *IVA INCLUIDO (16%):* `\$${ivaCalculado.toStringAsFixed(2)}`');
-    
+    buffer.writeln('CAMBIO: \$${change.toStringAsFixed(2)}');
+    buffer.writeln('--------------------------------------');
+    buffer.writeln(_convertirTotalALetras(total));
+    buffer.writeln('--------------------------------------');
+    buffer.writeln('ARTÍCULOS VENDIDOS: $totalArticulos');
+    buffer.writeln('IVA INCLUIDO (16%): \$${ivaCalculado.toStringAsFixed(2)}');
+
     if (_linkedUsername != null) {
-      buffer.writeln('`--------------------------------------`');
-      buffer.writeln('👤 *CLIENTE:* `@$_linkedUsername`');
+      buffer.writeln('--------------------------------------');
+      buffer.writeln('CLIENTE: @$_linkedUsername');
     }
-    
-    buffer.writeln('`--------------------------------------`');
+
+    buffer.writeln('--------------------------------------');
     buffer.writeln('¡Venta realizada con éxito!');
 
     final destinoChatId = _linkedChatId ?? _telegramChatId;
     final url = Uri.parse('https://api.telegram.org/bot$_telegramBotToken/sendMessage');
-    
+
     try {
-      await http.post(url, body: {
+      final response = await http.post(url, body: {
         'chat_id': destinoChatId,
         'text': buffer.toString(),
-        'parse_mode': 'Markdown',
+        // Sin parse_mode: texto plano. Ya no puede truenar por entidades mal formadas.
       });
+
+      if (response.statusCode != 200) {
+        debugPrint('❌ Telegram rechazó el ticket (${response.statusCode}): ${response.body}');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ Telegram no aceptó el ticket (${response.statusCode}): ${response.body}'),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 6),
+            ),
+          );
+        }
+      }
     } catch (e) {
-      debugPrint('Error enviando a Telegram: $e');
+      debugPrint('Error de red enviando a Telegram: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('⚠️ No se pudo contactar a Telegram: $e'), backgroundColor: Colors.orange),
+        );
+      }
     }
   }
 
@@ -258,7 +280,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
         pageFormat: const PdfPageFormat(58 * PdfPageFormat.mm, double.infinity, marginAll: 2 * PdfPageFormat.mm),
         build: (pw.Context context) {
           return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start, 
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Center(child: pw.Text('Walmart', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14))),
               pw.Center(child: pw.Text('Express', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
@@ -271,11 +293,11 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
               pw.Text('FECHA: ${DateTime.now().toString().substring(0, 19)}', style: const pw.TextStyle(fontSize: 6)),
               pw.Text('TDA#3812  OP#00000254  TE# 079  TR# 02410', style: const pw.TextStyle(fontSize: 6)),
               pw.Text('------------------------------------', style: const pw.TextStyle(fontSize: 6)),
-              
+
               ...items.map((item) {
                 double subtotal = (item['price'] ?? 0.0) * (item['quantity'] ?? 1);
                 return pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start, 
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(item['code'].toString(), style: const pw.TextStyle(fontSize: 6)),
                     pw.Row(
@@ -289,7 +311,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                   ],
                 );
               }).toList(),
-              
+
               pw.Text('------------------------------------', style: const pw.TextStyle(fontSize: 6)),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -343,10 +365,10 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
         return;
       }
       final Printer thermalPrinter = printers.firstWhere(
-        (printer) => 
-          printer.name.toLowerCase().contains('pos') || 
-          printer.name.toLowerCase().contains('thermal') || 
-          printer.name.toLowerCase().contains('58') || 
+        (printer) =>
+          printer.name.toLowerCase().contains('pos') ||
+          printer.name.toLowerCase().contains('thermal') ||
+          printer.name.toLowerCase().contains('58') ||
           printer.name.toLowerCase().contains('xprinter'),
         orElse: () => printers.first,
       );
@@ -385,7 +407,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
           _isProcessingPayment = false;
           _cashController.clear();
           _paymentErrorText = null;
-          _linkedChatId = null; 
+          _linkedChatId = null;
           _linkedUsername = null;
         });
         _showWalmartTicket(ticketItems, ticketTotal, cashReceived, change, isCard: false);
@@ -416,7 +438,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
           _isProcessingPayment = false;
           _cashController.clear();
           _paymentErrorText = null;
-          _linkedChatId = null; 
+          _linkedChatId = null;
           _linkedUsername = null;
         });
         _showWalmartTicket(ticketItems, ticketTotal, ticketTotal, 0.0, isCard: true);
@@ -452,7 +474,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                 Text('FECHA: ${DateTime.now().toString().substring(0,19)}', style: const TextStyle(fontFamily: 'Courier', fontSize: 11, color: Colors.black)),
                 const Text('TDA#3812  OP#00000254  TE# 079  TR# 02410', style: TextStyle(fontFamily: 'Courier', fontSize: 10, color: Colors.black)),
                 const Text('-------------------------------------', style: TextStyle(fontFamily: 'Courier', color: Colors.black)),
-                
+
                 ...items.map((item) {
                   double subtotal = (item['price'] ?? 0.0) * (item['quantity'] ?? 1);
                   return Padding(
@@ -473,7 +495,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                     ),
                   );
                 }).toList(),
-                
+
                 const Text('-------------------------------------', style: TextStyle(fontFamily: 'Courier', color: Colors.black)),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -582,9 +604,8 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
               onPressed: () async {
                 if (userCtrl.text.trim().isEmpty || passCtrl.text.isEmpty) return;
                 try {
-                  // CORREGIDO: Garantizamos que currentOperatorRole no sea nulo enviando un valor por defecto
                   await DatabaseHelper.instance.registerUser(
-                    currentOperatorRole: widget.userRole ?? 'Cajero',
+                    currentOperatorRole: widget.userRole ?? '',
                     newUsername: userCtrl.text.trim(),
                     newPassword: passCtrl.text,
                     newRole: selectedRole,
@@ -679,64 +700,25 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 10),
-                            Expanded(
-                              child: sales.isEmpty
-                                  ? const Center(child: Text('Sin movimientos hoy.'))
-                                  : ListView.builder(
-                                      itemCount: sales.length,
-                                      itemBuilder: (context, index) {
-                                        final sale = sales[index];
-                                        return ListTile(
-                                          leading: const Icon(Icons.receipt_long, color: Colors.blueGrey),
-                                          title: Text('Ticket ID: #${sale['id']}'),
-                                          subtitle: Text(sale['date'].toString().substring(11, 19)),
-                                          trailing: Text('\$${(sale['total'] ?? 0.0).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                        );
-                                      },
-                                    ),
-                            ),
                           ],
                         ),
                         if (widget.userRole == 'Administrador' || widget.userRole == 'admin')
                           Column(
                             children: [
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton.icon(
-                                  icon: const Icon(Icons.person_add, size: 18),
-                                  label: const Text('Nueva cuenta'),
-                                  onPressed: () => _showCreateUserDialog(setDialogState, () async {
-                                    users = await DatabaseHelper.instance.getUsers();
-                                    setDialogState(() {});
-                                  }),
-                                ),
-                              ),
-                              Expanded(
-                                child: users.isEmpty
-                                    ? const Center(child: Text('No hay cuentas creadas.'))
-                                    : ListView.builder(
-                                        itemCount: users.length,
-                                        itemBuilder: (context, index) {
-                                          final user = users[index];
-                                          return ListTile(
-                                            leading: const Icon(Icons.person_outline, color: Color(0xFF232D37)),
-                                            title: Text(user['username'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                                            subtitle: Text('Puesto: ${user['role']}'),
-                                            trailing: user['role'] == 'Administrador' || user['username'] == 'admin'
-                                                ? const Tooltip(message: 'Cuenta Raíz Protegida', child: Icon(Icons.shield, color: Colors.amber))
-                                                : IconButton(
-                                                    icon: const Icon(Icons.person_remove, color: Colors.redAccent),
-                                                    tooltip: 'Dar de baja inmediatamente',
-                                                    onPressed: () async {
-                                                      await DatabaseHelper.instance.deleteUser(user['username']);
-                                                      final updatedUsers = await DatabaseHelper.instance.getUsers();
-                                                      setDialogState(() { users = updatedUsers; });
-                                                    },
-                                                  ),
-                                          );
-                                        },
-                                      ),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Empleados registrados (${users.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF232D37)),
+                                    icon: const Icon(Icons.add, size: 18, color: Colors.white),
+                                    label: const Text('Nuevo', style: TextStyle(color: Colors.white)),
+                                    onPressed: () => _showCreateUserDialog(setDialogState, () async {
+                                      final updated = await DatabaseHelper.instance.getUsers();
+                                      setDialogState(() => users = updated);
+                                    }),
+                                  )
+                                ],
                               ),
                             ],
                           ),
@@ -755,281 +737,154 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
       appBar: AppBar(
-        title: Text('Terminal de Ventas - Modulo: ${widget.userRole ?? "General"}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text('Terminal de Ventas - Modulo: ${widget.userRole ?? 'Cajero'}'),
         backgroundColor: const Color(0xFF232D37),
-        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          TextButton.icon(
-            style: TextButton.styleFrom(foregroundColor: Colors.white),
-            icon: Icon(
-              _linkedChatId != null ? Icons.telegram : Icons.telegram_outlined,
-              color: _linkedChatId != null ? Colors.blue.shade300 : Colors.white60
-            ),
-            label: Text(
-              _linkedUsername != null ? '@$_linkedUsername' : 'Vincular Cliente',
-              style: TextStyle(fontWeight: _linkedChatId != null ? FontWeight.bold : FontWeight.normal),
-            ),
-            onPressed: _abrirVinculacionTelegram,
-          ),
           IconButton(
             icon: const Icon(Icons.analytics_outlined),
-            tooltip: 'Corte y Personal',
+            tooltip: 'Panel / Corte',
             onPressed: _showSalesReport,
           ),
           IconButton(
             icon: const Icon(Icons.inventory_2_outlined),
             tooltip: 'Inventario',
-            // CORREGIDO: se agrega '?? Cajero' porque InventoryScreen exige un userRole no nulo (String)
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => InventoryScreen(userRole: widget.userRole ?? 'Cajero')),
-              );
-            },
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => InventoryScreen(userRole: widget.userRole))),
           ),
-          const SizedBox(width: 10),
+          TextButton.icon(
+            icon: const Icon(Icons.telegram, color: Colors.white),
+            label: Text(_linkedUsername != null ? '@$_linkedUsername' : 'Vincular Cliente', style: const TextStyle(color: Colors.white)),
+            onPressed: _abrirVinculacionTelegram,
+          ),
         ],
       ),
       body: Row(
         children: [
-          // 🛒 COLUMNA IZQUIERDA: CONTROL DEL CARRITO Y BÚSQUEDA
           Expanded(
-            flex: 3,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  SearchAnchor(
+            flex: 2,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: SearchAnchor(
                     searchController: _searchController,
-                    builder: (context, controller) => SearchBar(
-                      controller: controller,
-                      padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.symmetric(horizontal: 16.0)),
-                      leading: const Icon(Icons.search),
-                      hintText: 'Buscar producto por nombre o código...',
-                      onTap: () => controller.openView(),
-                      onChanged: (_) => controller.openView(),
-                    ),
+                    builder: (context, controller) {
+                      return SearchBar(
+                        controller: controller,
+                        hintText: 'Buscar producto por nombre o código...',
+                        leading: const Icon(Icons.search),
+                        onSubmitted: _handleSearchSubmit,
+                      );
+                    },
                     suggestionsBuilder: (context, controller) async {
-                      final results = await DatabaseHelper.instance.searchProducts(controller.text.trim());
+                      final results = await DatabaseHelper.instance.searchProducts(controller.text);
                       return results.map((product) => ListTile(
                         title: Text(product['name']),
                         subtitle: Text('Código: ${product['code']} | Stock: ${product['stock']}'),
-                        trailing: Text('\$${(product['price'] ?? 0.0).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        onTap: () => _addProductToCart(product),
-                      )).toList();
+                        trailing: Text('\$${product['price']}'),
+                        onTap: () {
+                          _addProductToCart(product);
+                          controller.closeView('');
+                        },
+                      ));
                     },
                   ),
-                  const SizedBox(height: 15),
-                  Expanded(
-                    child: Card(
-                      color: Colors.white,
-                      elevation: 2,
-                      child: _cart.isEmpty
-                          ? const Center(child: Text('El carrito está vacío.', style: TextStyle(fontSize: 16, color: Colors.grey)))
-                          : ListView.builder(
-                              itemCount: _cart.length,
-                              itemBuilder: (context, index) {
-                                final item = _cart[index];
-                                return ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: const Color(0xFF232D37),
-                                    child: Text('${item['quantity']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                  ),
-                                  title: Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  subtitle: Text('Código: ${item['code']} | unit: \$${item['price']}'),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text('\$${((item['price'] ?? 0.0) * item['quantity']).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                      IconButton(
-                                        icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
-                                        onPressed: () {
-                                          setState(() {
-                                            if (item['quantity'] > 1) {
-                                              item['quantity'] -= 1;
-                                            } else {
-                                              _cart.removeAt(index);
-                                            }
-                                            _calculateTotal();
-                                          });
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.add_circle_outline, color: Colors.green),
-                                        onPressed: () {
-                                          setState(() {
-                                            if (item['quantity'] < (item['stock'] ?? 0)) {
-                                              item['quantity'] += 1;
-                                              _calculateTotal();
-                                            } else {
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                const SnackBar(content: Text('No hay más stock disponible.'))
-                                              );
-                                            }
-                                          });
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          // 💳 COLUMNA DERECHA: PASARELA MULTI-PAGO
-          Expanded(
-            flex: 2,
-            child: Container(
-              margin: const EdgeInsets.only(top: 16, bottom: 16, right: 16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)]
-              ),
-              padding: const EdgeInsets.all(20.0),
-              child: _isProcessingPayment
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(color: Color(0xFF232D37)),
-                          SizedBox(height: 15),
-                          Text('Procesando venta y emitiendo comprobantes...', style: TextStyle(fontWeight: FontWeight.bold))
-                        ],
-                      ),
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text('RESUMEN DE COBRO', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-                        const SizedBox(height: 15),
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 15),
-                          decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(8)),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text('TOTAL A PAGAR:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                              // CORREGIDO: Cambiado FontWeight.black por FontWeight.w900 para prevenir fallos de compilación
-                              Text('\$${_total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF232D37))),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 25),
-                        const Text('💵 OPCIÓN A: PAGO EFECTIVO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green)),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _cashController,
-                          keyboardType: TextInputType.number,
-                          textInputAction: TextInputAction.done,
-                          decoration: InputDecoration(
-                            labelText: 'Monto Recibido',
-                            prefixText: '\$ ',
-                            errorText: _paymentErrorText,
-                            border: const OutlineInputBorder(),
-                          ),
-                          // CORREGIDO: Enter aquí registra el pago directo, sin tener que
-                          // soltar el teclado para hacer clic en el botón.
-                          onSubmitted: (_) {
-                            if (_total > 0) {
-                              double cash = double.tryParse(_cashController.text) ?? 0.0;
-                              _processLateralCheckout(cash);
-                            }
+                ),
+                Expanded(
+                  child: _cart.isEmpty
+                      ? const Center(child: Text('El carrito está vacío', style: TextStyle(color: Colors.grey)))
+                      : ListView.builder(
+                          itemCount: _cart.length,
+                          itemBuilder: (context, index) {
+                            final item = _cart[index];
+                            return ListTile(
+                              title: Text(item['name']),
+                              subtitle: Text('\$${item['price']} x ${item['quantity']}'),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('\$${(item['price'] * item['quantity']).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete, color: Colors.red),
+                                    onPressed: () {
+                                      setState(() {
+                                        _cart.removeAt(index);
+                                        _calculateTotal();
+                                      });
+                                    },
+                                  )
+                                ],
+                              ),
+                            );
                           },
                         ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final billete in [20.0, 50.0, 100.0, 200.0, 500.0])
-                              OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.green.shade800,
-                                  side: BorderSide(color: Colors.green.shade300),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                ),
-                                onPressed: () => _addQuickCash(billete),
-                                child: Text('+\$${billete.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                              ),
-                            OutlinedButton(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.blueGrey.shade700,
-                                side: BorderSide(color: Colors.blueGrey.shade200),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              ),
-                              onPressed: () {
-                                _cashController.text = _total % 1 == 0 ? _total.toStringAsFixed(0) : _total.toStringAsFixed(2);
-                                setState(() { _paymentErrorText = null; });
-                              },
-                              child: const Text('Exacto', style: TextStyle(fontWeight: FontWeight.bold)),
-                            ),
-                            OutlinedButton(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.red.shade700,
-                                side: BorderSide(color: Colors.red.shade200),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              ),
-                              onPressed: () {
-                                _cashController.clear();
-                                setState(() { _paymentErrorText = null; });
-                              },
-                              child: const Icon(Icons.backspace_outlined, size: 18),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green.shade700,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14)
-                          ),
-                          icon: const Icon(Icons.payments_outlined),
-                          label: const Text('Registrar Pago Efectivo', style: TextStyle(fontWeight: FontWeight.bold)),
-                          onPressed: _total > 0 ? () {
-                            double cash = double.tryParse(_cashController.text) ?? 0.0;
-                            _processLateralCheckout(cash);
-                          } : null,
-                        ),
-                        const SizedBox(height: 20),
-                        const Row(
-                          children: [
-                            Expanded(child: Divider()),
-                            Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text('O', style: TextStyle(color: Colors.grey))),
-                            Expanded(child: Divider()),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        const Text('💳 OPCIÓN B: PAGO CON TARJETA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blue)),
-                        const SizedBox(height: 10),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue.shade800,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
-                          ),
-                          icon: const Icon(Icons.credit_card_outlined),
-                          label: const Text('Cobrar con Tarjeta (Débito/Crédito)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          onPressed: _total > 0 ? _processCardCheckout : null,
-                        ),
-                        const Spacer(),
-                        OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Cancelar / Vaciar Carrito'),
-                          onPressed: _cart.isEmpty ? null : _clearCart,
-                        )
-                      ],
-                    ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 350,
+            color: Colors.grey[100],
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('RESUMEN DE COBRO', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('TOTAL A PAGAR:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('\$${_total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Color(0xFF232D37))),
+                  ],
+                ),
+                const Divider(height: 30),
+                const Text('OPCIÓN A: PAGO EFECTIVO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green)),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _cashController,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Monto Recibido',
+                    prefixText: '\$ ',
+                    errorText: _paymentErrorText,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  children: [50, 100, 200, 500].map((amt) => ActionChip(
+                    label: Text('+\$$amt'),
+                    onPressed: () => _addQuickCash(amt.toDouble()),
+                  )).toList(),
+                ),
+                const SizedBox(height: 15),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.all(15)),
+                  icon: const Icon(Icons.payments, color: Colors.white),
+                  label: const Text('Registrar Pago Efectivo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  onPressed: _cart.isEmpty || _isProcessingPayment
+                      ? null
+                      : () => _processLateralCheckout(double.tryParse(_cashController.text) ?? 0.0),
+                ),
+                const Spacer(),
+                const Text('OPCIÓN B: PAGO CON TARJETA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blue)),
+                const SizedBox(height: 10),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF232D37), padding: const EdgeInsets.all(15)),
+                  icon: const Icon(Icons.credit_card, color: Colors.white),
+                  label: const Text('Cobrar con Tarjeta (Débito/Crédito)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  onPressed: _cart.isEmpty || _isProcessingPayment ? null : _processCardCheckout,
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                  icon: const Icon(Icons.cancel),
+                  label: const Text('Cancelar / Vaciar Carrito'),
+                  onPressed: _clearCart,
+                )
+              ],
             ),
           )
         ],
