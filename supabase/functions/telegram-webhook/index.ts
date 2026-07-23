@@ -13,18 +13,38 @@ Deno.serve(async (req) => {
 
     const chatId = message.chat.id
     const text = message.text.trim()
+    const textLower = text.toLowerCase()
 
-    // 1. Si el cliente inicia el bot o pide código
-    if (text === '/start' || text.toLowerCase() === 'hola') {
+    // CORREGIDO: se agrega '/vincular' (y variantes con mayúsculas/espacios)
+    // como disparador del código. Antes solo escuchaba '/start' y 'hola',
+    // así que '/vincular' caía directo a la búsqueda de productos de abajo.
+    if (
+      textLower === '/start' ||
+      textLower === '/vincular' ||
+      textLower === 'hola'
+    ) {
       const shortCode = Math.floor(1000 + Math.random() * 9000).toString() // Genera código de 4 dígitos
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString() // Expira en 15 minutos
 
-      await supabase.from('telegram_customers').upsert({
+      const { error: upsertError } = await supabase.from('telegram_customers').upsert({
         chat_id: chatId.toString(),
         username: message.from.username || null,
         short_code: shortCode,
         expires_at: expiresAt
       })
+
+      if (upsertError) {
+        console.error('Error guardando telegram_customers:', upsertError)
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: '❌ Hubo un error generando tu código. Intenta de nuevo en un momento.'
+          })
+        })
+        return new Response('OK')
+      }
 
       await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
@@ -37,15 +57,15 @@ Deno.serve(async (req) => {
       return new Response('OK')
     }
 
-    // 2. Si el cliente pregunta por el precio de un producto
-    // Busca en la tabla 'products' coincidencias por nombre
+    // A partir de aquí, cualquier otro texto se trata como búsqueda de producto
+    // (sin cambios respecto a lo que ya tenías y funciona bien).
     const { data: products } = await supabase
       .from('products')
       .select('name, price')
       .ilike('name', `%${text}%`)
       .limit(3)
 
-    let responseText = `No encontré ningún producto que coincida con "${text}". Intenta con otro nombre.`
+    let responseText = `No encontré ningún producto que coincida con "${text}". Intenta con otro nombre.\n\nSi buscabas vincular tu cuenta, escribe /vincular.`
     if (products && products.length > 0) {
       responseText = `🔍 Resultados para "${text}":\n\n` + 
         products.map(p => `📦 ${p.name}\n💰 Precio: $${p.price}`).join('\n\n')
@@ -59,6 +79,7 @@ Deno.serve(async (req) => {
 
     return new Response('OK')
   } catch (error) {
+    console.error('Error en telegram-webhook:', error)
     return new Response(JSON.stringify({ error: error.message }), { status: 400 })
   }
 })

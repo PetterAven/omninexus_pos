@@ -32,7 +32,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   String? _linkedUsername;
 
   // ================= CREDENCIALES TELEGRAM =================
-  final String _telegramBotToken = '8903317057:AAED_G8nbaMzMibTXySvCY7LFt6FjoMsqkE';
+  final String _telegramBotToken = '8903317057:AAEcJArqTDlU_EmTkhhbEyiyVLo1CzVcq4';
   final String _telegramChatId = '8940573921';
 
   String _convertirTotalALetras(double cantidad) {
