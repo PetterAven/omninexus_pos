@@ -1,6 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
+// CORREGIDO: en Android/iOS, este import es el que registra el databaseFactory
+// por defecto (basado en canales de plataforma nativos). Antes el archivo solo
+// importaba sqflite_common_ffi (que solo se activa para Windows/Linux), así
+// que en el teléfono nada dejaba listo el databaseFactory y la app truena con
+// "Bad state: databaseFactory not initialized" al abrir la base de datos.
+import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -41,7 +48,7 @@ class DatabaseHelper {
     return await databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onCreate: _createDB,
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -59,6 +66,17 @@ class DatabaseHelper {
                 'role': 'Administrador'
               });
             } catch (_) {}
+          }
+          if (oldVersion < 3) {
+            // NUEVO: tabla de configuración local. Se usa para el "código
+            // de sincronización" que separa el carrito remoto de cada caja
+            // (antes era un canal global sin ningún filtro).
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+              )
+            ''');
           }
         },
       ),
@@ -100,6 +118,13 @@ class DatabaseHelper {
         username TEXT PRIMARY KEY,
         password TEXT NOT NULL,
         role TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
       )
     ''');
 
@@ -275,6 +300,44 @@ class DatabaseHelper {
   }
 
   // ============================================================
+  //  MÉTODOS DE REPORTES
+  // ============================================================
+
+  /// CORREGIDO/NUEVO: antes, el Corte de Caja solo leía la base de datos
+  /// LOCAL de cada equipo, así que una venta hecha en el teléfono nunca se
+  /// veía en el reporte de la PC (y viceversa). Igual que getProducts(),
+  /// primero intentamos jalar las ventas de Supabase y las guardamos en
+  /// local, así el reporte siempre refleja lo que pasó en TODOS los
+  /// dispositivos, no solo en el que estás viendo.
+  Future<List<Map<String, dynamic>>> getSales() async {
+    try {
+      final cloudSales = await _supabase
+          .from('sales')
+          .select()
+          .order('id', ascending: false)
+          .timeout(_networkTimeout);
+
+      if (cloudSales.isNotEmpty) {
+        final db = await instance.database;
+        for (var sale in cloudSales) {
+          await db.insert('sales', {
+            'id': sale['id'],
+            'total': double.parse(sale['total'].toString()),
+            'date': sale['date'].toString(),
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+      lastSyncOk = true;
+    } catch (e) {
+      lastSyncOk = false;
+      debugPrint('Modo Offline: mostrando ventas guardadas en este equipo. $e');
+    }
+
+    final db = await instance.database;
+    return await db.query('sales', orderBy: 'id DESC');
+  }
+
+  // ============================================================
   //  MÉTODOS DE USUARIOS (REGLAS DE EMPRESA)
   // ============================================================
 
@@ -374,5 +437,101 @@ class DatabaseHelper {
   Future close() async {
     final db = await instance.database;
     db.close();
+  }
+
+  // ============================================================
+  //  CARRITO REMOTO EN TIEMPO REAL (Teléfono -> PC)
+  // ============================================================
+  // Usa un canal de "broadcast" de Supabase Realtime: no necesita tablas
+  // nuevas ni políticas RLS, solo que el proyecto tenga Realtime activo
+  // (viene activo por defecto). Por diseño de Supabase, un cliente NUNCA
+  // recibe sus propios mensajes de vuelta (self: false es el comportamiento
+  // por defecto), así que no hay riesgo de que un dispositivo se duplique
+  // el producto a sí mismo.
+  RealtimeChannel? _remoteCartChannel;
+
+  /// CORREGIDO: antes el canal era 'pos-remote-cart' fijo — cualquier
+  /// dispositivo con la app instalada (sin importar el usuario que inició
+  /// sesión) recibía y transmitía en el mismo canal. Ahora cada "caja" tiene
+  /// su propio código de sincronización guardado localmente, y el canal se
+  /// arma como 'pos-remote-cart-<código>', así solo se emparejan los
+  /// dispositivos que comparten el mismo código.
+  Future<String> getSyncCode() async {
+    final db = await instance.database;
+    final rows = await db.query('app_settings', where: 'key = ?', whereArgs: ['sync_code']);
+    if (rows.isNotEmpty) return rows.first['value'] as String;
+    return 'CAJA1'; // valor por defecto si nunca se ha configurado
+  }
+
+  Future<void> setSyncCode(String code) async {
+    final db = await instance.database;
+    await db.insert(
+      'app_settings',
+      {'key': 'sync_code', 'value': code.trim().toUpperCase()},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    // Si ya había un canal abierto con el código viejo, lo cerramos para
+    // que la próxima escucha/envío use el nuevo código.
+    stopRemoteCartListen();
+  }
+
+  /// Escucha productos escaneados desde otro dispositivo emparejado con el
+  /// mismo código de sincronización, y los entrega mediante
+  /// [onProductScanned]. Llamar en initState().
+  Future<void> listenToRemoteCart(void Function(Map<String, dynamic> product) onProductScanned) async {
+    final code = await getSyncCode();
+    _remoteCartChannel = _supabase.channel('pos-remote-cart-$code');
+
+    _remoteCartChannel!
+        .onBroadcast(
+          event: 'product_scanned',
+          callback: (payload) {
+            try {
+              onProductScanned(Map<String, dynamic>.from(payload));
+            } catch (e) {
+              debugPrint('Error procesando producto remoto: $e');
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  /// Manda un producto escaneado a cualquier otro dispositivo emparejado
+  /// con el mismo código de sincronización.
+  Future<void> sendProductToRemoteCart(Map<String, dynamic> product) async {
+    try {
+      if (_remoteCartChannel == null) {
+        final code = await getSyncCode();
+        final completer = Completer<void>();
+        _remoteCartChannel = _supabase.channel('pos-remote-cart-$code');
+        _remoteCartChannel!.subscribe((status, error) {
+          if (status == RealtimeSubscribeStatus.subscribed && !completer.isCompleted) {
+            completer.complete();
+          }
+        });
+        await completer.future.timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => debugPrint('Timeout esperando suscripción al carrito remoto'),
+        );
+      }
+
+      await _remoteCartChannel!.sendBroadcastMessage(
+        event: 'product_scanned',
+        payload: {
+          'code': product['code'],
+          'name': product['name'],
+          'price': product['price'],
+          'stock': product['stock'],
+        },
+      );
+    } catch (e) {
+      debugPrint('No se pudo transmitir el producto al carrito remoto: $e');
+    }
+  }
+
+  /// Deja de escuchar/usar el canal remoto. Llamar en dispose().
+  void stopRemoteCartListen() {
+    _remoteCartChannel?.unsubscribe();
+    _remoteCartChannel = null;
   }
 }

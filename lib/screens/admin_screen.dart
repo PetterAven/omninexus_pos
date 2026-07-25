@@ -4,7 +4,7 @@ import '../models/database_helper.dart';
 class AdminScreen extends StatefulWidget {
   final String userRole;
 
-  const AdminScreen({Key? key, required this.userRole}) : super(key: key);
+  const AdminScreen({super.key, required this.userRole});
 
   @override
   State<AdminScreen> createState() => _AdminScreenState();

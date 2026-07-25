@@ -5,7 +5,7 @@ import 'sales_terminal_screen.dart'; // Importaci√≥n necesaria para la navegaci√
 class InventoryScreen extends StatefulWidget {
   final String userRole; 
 
-  const InventoryScreen({Key? key, required this.userRole}) : super(key: key);
+  const InventoryScreen({super.key, required this.userRole});
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();

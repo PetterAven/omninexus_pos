@@ -22,7 +22,7 @@ void main() async {
 }
 
 class OmniNexusApp extends StatelessWidget {
-  const OmniNexusApp({Key? key}) : super(key: key);
+  const OmniNexusApp({super.key});
 
   @override
   Widget build(BuildContext context) {
