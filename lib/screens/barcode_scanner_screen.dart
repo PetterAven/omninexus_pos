@@ -13,8 +13,44 @@ class BarcodeScannerScreen extends StatefulWidget {
 }
 
 class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
-  final MobileScannerController _controller = MobileScannerController();
+  // CORREGIDO: antes el controller no tenía ninguna configuración, así que
+  // mobile_scanner analizaba TODA la imagen de la cámara (incluyendo zonas
+  // fuera de foco) sin límite de formatos ni de velocidad, y eso es lo que
+  // se sentía como "falla mucho". Ahora se limita a los formatos de barras
+  // que realmente usa un POS y se activa el modo "sin duplicados" para que
+  // no se dispare el mismo código 10 veces por segundo.
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+    formats: const [
+      BarcodeFormat.ean13,
+      BarcodeFormat.ean8,
+      BarcodeFormat.upcA,
+      BarcodeFormat.upcE,
+      BarcodeFormat.code128,
+      BarcodeFormat.code39,
+    ],
+    facing: CameraFacing.back,
+    torchEnabled: false,
+  );
+
   bool _handled = false; // evita procesar el mismo código varias veces seguidas
+  bool _torchOn = false;
+
+  // CORREGIDO/NUEVO: el marco verde antes era decorativo (270x170 fijo) y no
+  // coincidía con el área que realmente se escaneaba, lo que hacía que la
+  // lectura fuera lenta/imprecisa y que el recuadro se viera "chico" en
+  // pantallas grandes. Ahora se calcula según el tamaño real de la pantalla
+  // y se lo pasamos a MobileScanner como `scanWindow`, así lo que el
+  // cajero ve es EXACTAMENTE el área que se está analizando.
+  Rect _scanWindowFor(Size screenSize) {
+    final width = screenSize.width * 0.85;
+    final height = screenSize.height * 0.28;
+    return Rect.fromCenter(
+      center: Offset(screenSize.width / 2, screenSize.height / 2),
+      width: width,
+      height: height,
+    );
+  }
 
   void _onDetect(BarcodeCapture capture) {
     if (_handled) return;
@@ -36,6 +72,9 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final scanWindow = _scanWindowFor(screenSize);
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -44,9 +83,12 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            icon: const Icon(Icons.flash_on),
+            icon: Icon(_torchOn ? Icons.flash_on : Icons.flash_off),
             tooltip: 'Linterna',
-            onPressed: () => _controller.toggleTorch(),
+            onPressed: () {
+              _controller.toggleTorch();
+              setState(() => _torchOn = !_torchOn);
+            },
           ),
           IconButton(
             icon: const Icon(Icons.cameraswitch),
@@ -58,24 +100,50 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          MobileScanner(controller: _controller, onDetect: _onDetect),
-          // Marco visual para guiar al usuario a centrar el código
-          Center(
-            child: Container(
-              width: 270,
-              height: 170,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.greenAccent, width: 3),
-                borderRadius: BorderRadius.circular(12),
+          MobileScanner(
+            controller: _controller,
+            scanWindow: scanWindow,
+            onDetect: _onDetect,
+            errorBuilder: (context, error) {
+              // CORREGIDO/NUEVO: antes, si la cámara no arrancaba (permiso
+              // negado, cámara ocupada, etc.) la pantalla se quedaba negra
+              // sin ninguna explicación y parecía que "el escáner falló".
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.no_photography_outlined, color: Colors.white70, size: 48),
+                      const SizedBox(height: 12),
+                      Text(
+                        'No se pudo abrir la cámara.\nRevisa que la app tenga permiso de cámara.\n(${error.errorCode.name})',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+          // Overlay oscuro fuera del área de escaneo, para que sea obvio
+          // dónde sí se está leyendo.
+          IgnorePointer(
+            child: ColoredBox(
+              color: Colors.transparent,
+              child: CustomPaint(
+                size: screenSize,
+                painter: _ScannerOverlayPainter(scanWindow),
               ),
             ),
           ),
           Positioned(
-            bottom: 30,
+            bottom: 40,
             left: 0,
             right: 0,
             child: Text(
-              'Apunta la cámara al código de barras del producto',
+              'Centra el código de barras dentro del recuadro',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
@@ -89,4 +157,30 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
       ),
     );
   }
+}
+
+/// Dibuja el marco verde exactamente sobre el `scanWindow` real, más un
+/// oscurecido ligero alrededor para guiar la vista del cajero.
+class _ScannerOverlayPainter extends CustomPainter {
+  final Rect scanWindow;
+  _ScannerOverlayPainter(this.scanWindow);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final backgroundPath = Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+    final cutoutPath = Path()..addRRect(RRect.fromRectAndRadius(scanWindow, const Radius.circular(16)));
+    final overlayPath = Path.combine(PathOperation.difference, backgroundPath, cutoutPath);
+
+    canvas.drawPath(overlayPath, Paint()..color = Colors.black.withOpacity(0.45));
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(scanWindow, const Radius.circular(16)),
+      Paint()
+        ..color = Colors.greenAccent
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScannerOverlayPainter oldDelegate) => oldDelegate.scanWindow != scanWindow;
 }

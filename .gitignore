@@ -36,6 +36,9 @@ migrate_working_dir/
 # Symbolication related
 app.*.symbols
 
+# Variables de entorno / credenciales -- NUNCA subir esto a GitHub
+.env
+
 # Obfuscation related
 app.*.map.json
 
@@ -43,3 +46,4 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+.scannerwork/

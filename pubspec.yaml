@@ -21,6 +21,9 @@ dependencies:
   printing: ^5.14.3
   mobile_scanner: ^7.4.0
   sqflite: ^2.4.3
+  # NUEVO: para leer las credenciales de Supabase desde un archivo .env
+  # en vez de tenerlas escritas directamente en el código fuente.
+  flutter_dotenv: ^5.2.1
 
 dev_dependencies:
   flutter_test:
@@ -39,3 +42,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icon/app_icon.png
+    - .env

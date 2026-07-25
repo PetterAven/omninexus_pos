@@ -1,21 +1,39 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // CORREGIDO: protegemos la inicialización con timeout + try/catch.
-  // Si la red está lenta/rota (como ya nos pasó), esto evita que la app
-  // se quede trabada antes de mostrar cualquier pantalla. Si falla, la app
-  // arranca igual y trabaja en modo local hasta que haya conexión.
+  // CORREGIDO: las credenciales ya NO están escritas en el código. Se leen
+  // del archivo .env (que está en .gitignore y nunca se sube a GitHub).
+  // Si falta el .env o alguna variable, tiramos un error claro en vez de
+  // que la app truene con un mensaje confuso más adelante.
   try {
-    await Supabase.initialize(
-      url: 'https://jkxktdmkoolvhsvdjrip.supabase.co',
-      publishableKey: 'sb_publishable_Olnu7y7fOCrBhEEzORhV0g_ZAZ-07j8',
-    ).timeout(const Duration(seconds: 8));
+    await dotenv.load(fileName: '.env');
   } catch (e) {
-    debugPrint('⚠️ No se pudo conectar con Supabase al iniciar (modo offline): $e');
+    debugPrint('⚠️ No se encontró el archivo .env. Copia .env.example como .env y pon tus credenciales.');
+  }
+
+  final supabaseUrl = dotenv.env['SUPABASE_URL'];
+  final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+
+  if (supabaseUrl == null || supabaseAnonKey == null) {
+    debugPrint('⚠️ Faltan SUPABASE_URL o SUPABASE_ANON_KEY en el .env. La app arrancará en modo local únicamente.');
+  } else {
+    // CORREGIDO: protegemos la inicialización con timeout + try/catch.
+    // Si la red está lenta/rota (como ya nos pasó), esto evita que la app
+    // se quede trabada antes de mostrar cualquier pantalla. Si falla, la app
+    // arranca igual y trabaja en modo local hasta que haya conexión.
+    try {
+      await Supabase.initialize(
+        url: supabaseUrl,
+        publishableKey: supabaseAnonKey,
+      ).timeout(const Duration(seconds: 8));
+    } catch (e) {
+      debugPrint('⚠️ No se pudo conectar con Supabase al iniciar (modo offline): $e');
+    }
   }
 
   runApp(const OmniNexusApp());

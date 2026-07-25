@@ -1190,43 +1190,135 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       appBar: AppBar(
-        title: Text('Terminal de Ventas - Modulo: ${widget.userRole ?? "General"}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        // CORREGIDO: título más corto en pantallas angostas. El título largo
+        // + 4 acciones (una con texto dinámico como "@usuario") se salían del
+        // ancho del teléfono y el AppBar de Flutter no hace wrap: los botones
+        // que no caben simplemente se recortan/ocultan. En la PC (ventana
+        // ancha) sí cabían todos, por eso en el celular "no aparecía" el
+        // botón de sincronizar: no es que faltara, es que no cabía.
+        title: LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = MediaQuery.of(context).size.width < 600;
+            return Text(
+              isNarrow
+                  ? 'Ventas'
+                  : 'Terminal de Ventas - Modulo: ${widget.userRole ?? "General"}',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+            );
+          },
+        ),
         backgroundColor: const Color(0xFF232D37),
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          TextButton.icon(
-            style: TextButton.styleFrom(foregroundColor: Colors.white),
-            icon: Icon(
-              _linkedChatId != null ? Icons.telegram : Icons.telegram_outlined,
-              color: _linkedChatId != null ? Colors.blue.shade300 : Colors.white60
-            ),
-            label: Text(
-              _linkedUsername != null ? '@$_linkedUsername' : 'Vincular Cliente',
-              style: TextStyle(fontWeight: _linkedChatId != null ? FontWeight.bold : FontWeight.normal),
-            ),
-            onPressed: _abrirVinculacionTelegram,
-          ),
+          // El botón de sincronización queda SIEMPRE visible y fijo, en
+          // todas las pantallas, porque es el más importante para que el
+          // teléfono y la PC se emparejen.
           IconButton(
             icon: const Icon(Icons.sync_alt),
             tooltip: 'Código de sincronización (teléfono ↔ PC)',
             onPressed: _showSyncCodeDialog,
           ),
-          IconButton(
-            icon: const Icon(Icons.analytics_outlined),
-            tooltip: 'Corte y Personal',
-            onPressed: _showSalesReport,
-          ),
-          IconButton(
-            icon: const Icon(Icons.inventory_2_outlined),
-            tooltip: 'Inventario',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => InventoryScreen(userRole: widget.userRole ?? 'Cajero')),
+          Builder(
+            builder: (context) {
+              final isNarrow = MediaQuery.of(context).size.width < 600;
+
+              // En pantallas anchas (PC) se muestran las 3 acciones restantes
+              // igual que antes, en fila.
+              if (!isNarrow) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton.icon(
+                      style: TextButton.styleFrom(foregroundColor: Colors.white),
+                      icon: Icon(
+                        _linkedChatId != null ? Icons.telegram : Icons.telegram_outlined,
+                        color: _linkedChatId != null ? Colors.blue.shade300 : Colors.white60,
+                      ),
+                      label: Text(
+                        _linkedUsername != null ? '@$_linkedUsername' : 'Vincular Cliente',
+                        style: TextStyle(fontWeight: _linkedChatId != null ? FontWeight.bold : FontWeight.normal),
+                      ),
+                      onPressed: _abrirVinculacionTelegram,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.analytics_outlined),
+                      tooltip: 'Corte y Personal',
+                      onPressed: _showSalesReport,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.inventory_2_outlined),
+                      tooltip: 'Inventario',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => InventoryScreen(userRole: widget.userRole ?? 'Cajero')),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                );
+              }
+
+              // En pantallas angostas (celular) se colapsan en un menú "⋮"
+              // para que nada se recorte ni quede oculto fuera de pantalla.
+              return PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'telegram':
+                      _abrirVinculacionTelegram();
+                      break;
+                    case 'corte':
+                      _showSalesReport();
+                      break;
+                    case 'inventario':
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => InventoryScreen(userRole: widget.userRole ?? 'Cajero')),
+                      );
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'telegram',
+                    child: Row(
+                      children: [
+                        Icon(
+                          _linkedChatId != null ? Icons.telegram : Icons.telegram_outlined,
+                          color: _linkedChatId != null ? Colors.blue : Colors.grey,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(_linkedUsername != null ? '@$_linkedUsername' : 'Vincular Cliente'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'corte',
+                    child: Row(
+                      children: [
+                        Icon(Icons.analytics_outlined, color: Colors.grey),
+                        SizedBox(width: 10),
+                        Text('Corte y Personal'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'inventario',
+                    child: Row(
+                      children: [
+                        Icon(Icons.inventory_2_outlined, color: Colors.grey),
+                        SizedBox(width: 10),
+                        Text('Inventario'),
+                      ],
+                    ),
+                  ),
+                ],
               );
             },
           ),
-          const SizedBox(width: 10),
         ],
       ),
       // CORREGIDO/NUEVO: layout responsive. En pantallas anchas (PC/tablet)
