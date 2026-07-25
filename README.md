@@ -1,17 +1,22 @@
-# omninexus_pos
+# 🛒 Omninexus POS
 
-A new Flutter project.
+Sistema de Punto de Venta (POS) multiplataforma desarrollado en **Flutter**, diseñado bajo principios de **Clean Architecture**, resiliencia **Offline-First** y sincronización en tiempo real.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## 🏛️ Arquitectura del Sistema
 
-A few resources to get you started if this is your first Flutter project:
+El proyecto sigue una arquitectura limpia en capas desacopladas, lo que garantiza testabilidad, escalabilidad y mantenibilidad.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```text
+lib/
+ ├── core/                  # Constantes globales, temas y sincronización de estado
+ ├── data/                  # Fuentes de datos y repositorios concretos
+ │   ├── datasources/local/ # Persistencia SQLite (app_database.dart)
+ │   └── repositories/      # Implementaciones con fallback offline (Supabase + SQLite)
+ ├── domain/                # Lógica de negocio e interfaces
+ │   ├── entities/          # Product, Sale, SaleDetail, AppUser
+ │   └── repositories/      # Contratos (Interfaces abstractas)
+ ├── presentation/          # Capa de interfaz de usuario (Pantallas y Widgets)
+ ├── services/              # Integraciones externas (Telegram, Supabase Client)
+ └── main.dart              # Punto de entrada

@@ -1,0 +1,128 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:bcrypt/bcrypt.dart';
+
+/// Datasource LOCAL: solo se encarga de abrir, crear y migrar la base de
+/// datos SQLite. Antes esta lógica vivía mezclada dentro de
+/// DatabaseHelper junto con las llamadas a Supabase y las reglas de
+/// negocio de cada pantalla; ahora solo sabe de SQLite, nada más.
+class AppDatabase {
+  static final AppDatabase instance = AppDatabase._init();
+  static Database? _database;
+
+  AppDatabase._init();
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDB('omninexus.db');
+    return _database!;
+  }
+
+  Future<Database> _initDB(String filePath) async {
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+
+    final dbPath = await databaseFactory.getDatabasesPath();
+    final path = join(dbPath, filePath);
+
+    return await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 3,
+        onCreate: _createDB,
+        onUpgrade: _onUpgrade,
+      ),
+    );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+          username TEXT PRIMARY KEY,
+          password TEXT NOT NULL,
+          role TEXT NOT NULL
+        )
+      ''');
+      try {
+        await db.insert('users', {
+          'username': 'admin',
+          'password': BCrypt.hashpw('admin123', BCrypt.gensalt()),
+          'role': 'Administrador',
+        });
+      } catch (_) {}
+    }
+    if (oldVersion < 3) {
+      // Tabla de configuración local (código de sincronización, etc.)
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      ''');
+    }
+  }
+
+  Future<void> _createDB(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE products (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        price REAL NOT NULL,
+        stock INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE sales (
+        id INTEGER PRIMARY KEY,
+        total REAL NOT NULL,
+        date TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE sale_details (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sale_id INTEGER NOT NULL,
+        product_code TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        price REAL NOT NULL,
+        quantity INTEGER NOT NULL,
+        FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE users (
+        username TEXT PRIMARY KEY,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    ''');
+
+    // Semilla inicial obligatoria (contraseña ya hasheada con bcrypt).
+    await db.insert('users', {
+      'username': 'admin',
+      'password': BCrypt.hashpw('admin123', BCrypt.gensalt()),
+      'role': 'Administrador',
+    });
+  }
+
+  Future<void> close() async {
+    final db = await instance.database;
+    db.close();
+  }
+}

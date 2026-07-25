@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../services/telegram_service.dart';
 
 class TelegramLinkDialog extends StatefulWidget {
   const TelegramLinkDialog({super.key});
@@ -10,7 +10,6 @@ class TelegramLinkDialog extends StatefulWidget {
 
 class _TelegramLinkDialogState extends State<TelegramLinkDialog> {
   final TextEditingController _codeController = TextEditingController();
-  final SupabaseClient _supabase = Supabase.instance.client;
 
   bool _isLoading = false;
   String? _errorMessage;
@@ -21,7 +20,7 @@ class _TelegramLinkDialogState extends State<TelegramLinkDialog> {
     super.dispose();
   }
 
-  /// Realiza la consulta directa a Supabase para validar el código de 4 dígitos
+  /// Valida el código de 4 dígitos a través de TelegramService
   Future<void> _verificarCodigo() async {
     final code = _codeController.text.trim();
 
@@ -38,12 +37,7 @@ class _TelegramLinkDialogState extends State<TelegramLinkDialog> {
     });
 
     try {
-      // Consultamos la tabla 'telegram_customers' buscando coincidencia activa
-      final response = await _supabase
-          .from('telegram_customers')
-          .select('chat_id, username, expires_at')
-          .eq('short_code', code)
-          .maybeSingle();
+      final response = await TelegramService.instance.buscarClientePorCodigo(code);
 
       if (!mounted) return;
 

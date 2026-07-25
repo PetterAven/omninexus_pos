@@ -3,7 +3,11 @@ import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart'; 
 import 'package:pdf/widgets.dart' as pw; 
 import 'package:printing/printing.dart'; 
-import '../models/database_helper.dart';
+import '../../core/sync_status.dart';
+import '../../data/repositories/product_repository.dart';
+import '../../data/repositories/sales_repository.dart';
+import '../../data/repositories/auth_repository.dart';
+import '../../data/repositories/sync_repository.dart';
 import 'inventory_screen.dart';
 import 'barcode_scanner_screen.dart';
 
@@ -41,7 +45,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     super.initState();
     // NUEVO: escucha productos escaneados desde otro dispositivo emparejado
     // con el mismo código de sincronización, y los agrega a este carrito.
-    DatabaseHelper.instance.listenToRemoteCart((scannedProduct) {
+    SyncRepository.instance.listenToRemoteCart((scannedProduct) {
       if (!mounted) return;
       _addProductToCart(scannedProduct);
     });
@@ -49,7 +53,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
 
   @override
   void dispose() {
-    DatabaseHelper.instance.stopRemoteCartListen();
+    SyncRepository.instance.stopRemoteCartListen();
     _searchController.dispose();
     _cashController.dispose();
     super.dispose();
@@ -57,7 +61,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
 
   // ================= NUEVO: CÓDIGO DE SINCRONIZACIÓN PC <-> TELÉFONO =================
   void _showSyncCodeDialog() async {
-    final currentCode = await DatabaseHelper.instance.getSyncCode();
+    final currentCode = await SyncRepository.instance.getSyncCode();
     if (!mounted) return;
 
     final codeController = TextEditingController(text: currentCode);
@@ -100,9 +104,9 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
             onPressed: () async {
               final newCode = codeController.text.trim();
               if (newCode.isEmpty) return;
-              await DatabaseHelper.instance.setSyncCode(newCode);
+              await SyncRepository.instance.setSyncCode(newCode);
               // Reabrimos la escucha con el código nuevo.
-              DatabaseHelper.instance.listenToRemoteCart((scannedProduct) {
+              SyncRepository.instance.listenToRemoteCart((scannedProduct) {
                 if (!mounted) return;
                 _addProductToCart(scannedProduct);
               });
@@ -236,7 +240,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
 
   Future<void> _handleSearchSubmit(String query) async {
     if (query.trim().isEmpty) return;
-    final results = await DatabaseHelper.instance.searchProducts(query.trim());
+    final results = await ProductRepository.instance.searchProducts(query.trim());
     if (results.isNotEmpty) {
       _addProductToCart(results.first);
       _searchController.closeView('');
@@ -474,7 +478,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
       final List<Map<String, dynamic>> ticketItems = List.from(_cart);
       final double ticketTotal = _total;
 
-      await DatabaseHelper.instance.registerSale(_total, _cart);
+      await SalesRepository.instance.registerSale(_total, _cart);
       await _sendTicketToTelegram(ticketItems, ticketTotal, cashReceived, change, isCard: false);
       await _printPhysicalTicket(ticketItems, ticketTotal, cashReceived, change, isCard: false);
 
@@ -505,7 +509,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
       final List<Map<String, dynamic>> ticketItems = List.from(_cart);
       final double ticketTotal = _total;
 
-      await DatabaseHelper.instance.registerSale(_total, _cart);
+      await SalesRepository.instance.registerSale(_total, _cart);
       await _sendTicketToTelegram(ticketItems, ticketTotal, ticketTotal, 0.0, isCard: true);
       await _printPhysicalTicket(ticketItems, ticketTotal, ticketTotal, 0.0, isCard: true);
 
@@ -681,7 +685,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                 if (userCtrl.text.trim().isEmpty || passCtrl.text.isEmpty) return;
                 try {
                   // CORREGIDO: Garantizamos que currentOperatorRole no sea nulo enviando un valor por defecto
-                  await DatabaseHelper.instance.registerUser(
+                  await AuthRepository.instance.registerUser(
                     currentOperatorRole: widget.userRole ?? 'Cajero',
                     newUsername: userCtrl.text.trim(),
                     newPassword: passCtrl.text,
@@ -693,11 +697,11 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        DatabaseHelper.instance.lastSyncOk
+                        SyncStatus.lastSyncOk
                             ? 'Cuenta creada y sincronizada con Supabase.'
                             : '⚠️ Cuenta creada solo en este equipo: no se pudo sincronizar con Supabase.',
                       ),
-                      backgroundColor: DatabaseHelper.instance.lastSyncOk ? Colors.green : Colors.orange,
+                      backgroundColor: SyncStatus.lastSyncOk ? Colors.green : Colors.orange,
                     ),
                   );
                 } catch (e) {
@@ -715,8 +719,8 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
   }
 
   void _showSalesReport() async {
-    List<Map<String, dynamic>> sales = await DatabaseHelper.instance.getSales();
-    List<Map<String, dynamic>> users = await DatabaseHelper.instance.getUsers();
+    List<Map<String, dynamic>> sales = await SalesRepository.instance.getSales();
+    List<Map<String, dynamic>> users = await AuthRepository.instance.getUsers();
 
     double granTotal = 0.0;
     for (var sale in sales) {
@@ -749,13 +753,13 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                       icon: const Icon(Icons.refresh),
                       tooltip: 'Sincronizar con Supabase',
                       onPressed: () async {
-                        final freshSales = await DatabaseHelper.instance.getSales();
-                        final freshUsers = await DatabaseHelper.instance.getUsers();
+                        final freshSales = await SalesRepository.instance.getSales();
+                        final freshUsers = await AuthRepository.instance.getUsers();
                         double freshTotal = 0.0;
                         for (var sale in freshSales) {
                           freshTotal += sale['total'] ?? 0.0;
                         }
-                        final syncOk = DatabaseHelper.instance.lastSyncOk;
+                        final syncOk = SyncStatus.lastSyncOk;
                         setDialogState(() {
                           sales = freshSales;
                           users = freshUsers;
@@ -813,11 +817,56 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                                       itemCount: sales.length,
                                       itemBuilder: (context, index) {
                                         final sale = sales[index];
-                                        return ListTile(
+                                        final saleId = sale['id'] as int;
+                                        return ExpansionTile(
                                           leading: const Icon(Icons.receipt_long, color: Colors.blueGrey),
-                                          title: Text('Ticket ID: #${sale['id']}'),
+                                          title: Text('Ticket ID: #$saleId'),
                                           subtitle: Text(sale['date'].toString().substring(11, 19)),
                                           trailing: Text('\$${(sale['total'] ?? 0.0).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                          // NUEVO: al desplegar el ticket se muestra el desglose de
+                                          // productos vendidos, sincronizado desde Supabase.
+                                          children: [
+                                            FutureBuilder<List<Map<String, dynamic>>>(
+                                              future: SalesRepository.instance.getSaleDetails(saleId),
+                                              builder: (context, snapshot) {
+                                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                                  return const Padding(
+                                                    padding: EdgeInsets.all(12),
+                                                    child: SizedBox(
+                                                      height: 20,
+                                                      width: 20,
+                                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                                    ),
+                                                  );
+                                                }
+                                                final details = snapshot.data ?? [];
+                                                if (details.isEmpty) {
+                                                  return const Padding(
+                                                    padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                                                    child: Text('Sin desglose disponible para este ticket.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                                  );
+                                                }
+                                                return Column(
+                                                  children: details.map((item) {
+                                                    final qty = item['quantity'] ?? 0;
+                                                    final price = (item['price'] ?? 0.0) as num;
+                                                    return Padding(
+                                                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                                                      child: Row(
+                                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                        children: [
+                                                          Expanded(
+                                                            child: Text('${item['product_name']} x$qty', style: const TextStyle(fontSize: 13)),
+                                                          ),
+                                                          Text('\$${(price * qty).toStringAsFixed(2)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  }).toList(),
+                                                );
+                                              },
+                                            ),
+                                          ],
                                         );
                                       },
                                     ),
@@ -833,7 +882,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                                   icon: const Icon(Icons.person_add, size: 18),
                                   label: const Text('Nueva cuenta'),
                                   onPressed: () => _showCreateUserDialog(setDialogState, () async {
-                                    final updatedUsers = await DatabaseHelper.instance.getUsers();
+                                    final updatedUsers = await AuthRepository.instance.getUsers();
                                     setDialogState(() { users = updatedUsers; });
                                   }),
                                 ),
@@ -855,8 +904,8 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
                                                     icon: const Icon(Icons.person_remove, color: Colors.redAccent),
                                                     tooltip: 'Dar de baja inmediatamente',
                                                     onPressed: () async {
-                                                      await DatabaseHelper.instance.deleteUser(user['username']);
-                                                      final updatedUsers = await DatabaseHelper.instance.getUsers();
+                                                      await AuthRepository.instance.deleteUser(user['username']);
+                                                      final updatedUsers = await AuthRepository.instance.getUsers();
                                                       setDialogState(() { users = updatedUsers; });
                                                     },
                                                   ),
@@ -886,13 +935,13 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     );
     if (code == null || code.isEmpty || !mounted) return;
 
-    final results = await DatabaseHelper.instance.searchProducts(code);
+    final results = await ProductRepository.instance.searchProducts(code);
     if (!mounted) return;
     if (results.isNotEmpty) {
       _addProductToCart(results.first);
       // NUEVO: transmite el producto escaneado a cualquier otro dispositivo
       // escuchando (típicamente la Terminal de Ventas en la PC).
-      DatabaseHelper.instance.sendProductToRemoteCart(results.first);
+      SyncRepository.instance.sendProductToRemoteCart(results.first);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se encontró ningún producto con el código "$code".')),
@@ -916,7 +965,7 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
               onChanged: (_) => controller.openView(),
             ),
             suggestionsBuilder: (context, controller) async {
-              final results = await DatabaseHelper.instance.searchProducts(controller.text.trim());
+              final results = await ProductRepository.instance.searchProducts(controller.text.trim());
               return results.map((product) => ListTile(
                 title: Text(product['name']),
                 subtitle: Text('Código: ${product['code']} | Stock: ${product['stock']}'),

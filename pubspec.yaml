@@ -24,6 +24,9 @@ dependencies:
   # NUEVO: para leer las credenciales de Supabase desde un archivo .env
   # en vez de tenerlas escritas directamente en el código fuente.
   flutter_dotenv: ^5.2.1
+  # NUEVO: para hashear contraseñas de usuarios (antes se guardaban en
+  # texto plano en la tabla `users`, tanto local como en Supabase).
+  bcrypt: ^1.1.3
 
 dev_dependencies:
   flutter_test:

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../models/database_helper.dart';
+import '../../data/repositories/auth_repository.dart';
 import 'sales_terminal_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => _isLoading = true);
-    final userData = await DatabaseHelper.instance.loginUser(user, pass);
+    final userData = await AuthRepository.instance.loginUser(user, pass);
     if (!mounted) return;
     setState(() => _isLoading = false);
 

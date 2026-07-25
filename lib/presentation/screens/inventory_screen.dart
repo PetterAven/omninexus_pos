@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../models/database_helper.dart';
+import '../../core/sync_status.dart';
+import '../../data/repositories/product_repository.dart';
 import 'sales_terminal_screen.dart'; // Importación necesaria para la navegación
 
 class InventoryScreen extends StatefulWidget {
@@ -37,7 +38,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   Future<void> _refreshInventory() async {
     setState(() => _isLoading = true);
-    final data = await DatabaseHelper.instance.getProducts();
+    final data = await ProductRepository.instance.getProducts();
     if (!mounted) return;
     setState(() {
       _products = data;
@@ -46,7 +47,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     // CORREGIDO: si getProducts() no pudo sincronizar (red lenta/caída),
     // avisamos aquí en vez de dejarlo silencioso.
-    if (!DatabaseHelper.instance.lastSyncOk && mounted) {
+    if (!SyncStatus.lastSyncOk && mounted) {
       _showSnackBar('⚠️ No se pudo conectar con Supabase. Mostrando datos guardados en este equipo.', Colors.orange);
     }
   }
@@ -130,8 +131,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
               try {
                 Navigator.pop(context);
-                await DatabaseHelper.instance.insertProduct(newProduct);
-                if (DatabaseHelper.instance.lastSyncOk) {
+                await ProductRepository.instance.insertProduct(newProduct);
+                if (SyncStatus.lastSyncOk) {
                   _showSnackBar('¡Producto guardado y sincronizado con Supabase!', Colors.green);
                 } else {
                   _showSnackBar('⚠️ Guardado solo en este equipo: no se pudo sincronizar con Supabase (revisa tu conexión).', Colors.orange);
@@ -199,8 +200,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
               
               try {
                 Navigator.pop(context);
-                await DatabaseHelper.instance.updateProduct(updatedProduct);
-                if (DatabaseHelper.instance.lastSyncOk) {
+                await ProductRepository.instance.updateProduct(updatedProduct);
+                if (SyncStatus.lastSyncOk) {
                   _showSnackBar('¡Producto actualizado y sincronizado con Supabase!', Colors.green);
                 } else {
                   _showSnackBar('⚠️ Actualizado solo en este equipo: no se pudo sincronizar con Supabase.', Colors.orange);
@@ -239,8 +240,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
             onPressed: () async {
               try {
                 Navigator.pop(context);
-                await DatabaseHelper.instance.deleteProduct(code);
-                if (DatabaseHelper.instance.lastSyncOk) {
+                await ProductRepository.instance.deleteProduct(code);
+                if (SyncStatus.lastSyncOk) {
                   _showSnackBar('Producto eliminado con éxito (local y Supabase).', Colors.blue);
                 } else {
                   _showSnackBar('⚠️ Eliminado solo en este equipo: no se pudo sincronizar con Supabase.', Colors.orange);
