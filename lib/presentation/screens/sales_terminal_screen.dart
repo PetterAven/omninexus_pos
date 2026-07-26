@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/product_repository.dart';
-import '../../data/repositories/sales_repository.dart';
 import '../../data/repositories/sync_repository.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/product.dart';
-import '../../services/ticket_telegram_service.dart';
-import '../../services/ticket_pdf_service.dart';
+import '../providers/checkout_controller.dart';
 import 'inventory_screen.dart';
 import 'barcode_scanner_screen.dart';
 import '../widgets/sales_terminal/payment_panel.dart';
@@ -15,23 +14,21 @@ import '../widgets/sales_terminal/ticket_receipt_dialog.dart';
 import '../widgets/sales_terminal/sales_report_dialog.dart';
 import '../widgets/telegram_link_dialog.dart';
 
-class SalesTerminalScreen extends StatefulWidget {
+class SalesTerminalScreen extends ConsumerStatefulWidget {
   final String? userRole;
 
   const SalesTerminalScreen({super.key, this.userRole});
 
   @override
-  State<SalesTerminalScreen> createState() => _SalesTerminalScreenState();
+  ConsumerState<SalesTerminalScreen> createState() => _SalesTerminalScreenState();
 }
 
-class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
+class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
   final List<CartItem> _cart = [];
   final SearchController _searchController = SearchController();
   final TextEditingController _cashController = TextEditingController();
 
   double _total = 0.0;
-  bool _isProcessingPayment = false;
-  String? _paymentErrorText;
 
   // ================= VARIABLES CLIENTE VINCULADO =================
   String? _linkedChatId;
@@ -74,9 +71,10 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     double nuevo = current + amount;
     _cashController.text =
         nuevo % 1 == 0 ? nuevo.toStringAsFixed(0) : nuevo.toStringAsFixed(2);
-    setState(() {
-      _paymentErrorText = null;
-    });
+    // El error de "monto inferior al total" ahora vive en el AsyncError
+    // del checkoutControllerProvider; al teclear un nuevo monto lo
+    // reseteamos para que no se quede pegado un error viejo en pantalla.
+    ref.read(checkoutControllerProvider.notifier).reset();
   }
 
   void _calculateTotal() {
@@ -86,7 +84,6 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     }
     setState(() {
       _total = total;
-      if (_total == 0) _isProcessingPayment = false;
     });
   }
 
@@ -141,12 +138,11 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
               setState(() {
                 _cart.clear();
                 _total = 0.0;
-                _isProcessingPayment = false;
                 _cashController.clear();
-                _paymentErrorText = null;
                 _linkedChatId = null;
                 _linkedUsername = null;
               });
+              ref.read(checkoutControllerProvider.notifier).reset();
               Navigator.pop(context);
             },
             child: const Text('Vaciar', style: TextStyle(color: Colors.red)),
@@ -187,159 +183,38 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
     return _cart.map((item) => item.toMap()).toList();
   }
 
-  // ================= PROCESAR VENTA CON EFECTIVO =================
-  Future<void> _processLateralCheckout(double cashReceived) async {
-    if (cashReceived < _total) {
-      setState(() {
-        _paymentErrorText = 'Monto inferior al total';
-      });
-      return;
-    }
-
+  // ================= REACCIÓN AL RESULTADO DEL COBRO =================
+  // Se llama desde el ref.listen del build() cuando el checkoutControllerProvider
+  // pasa de loading a data(null) con éxito: pinta el ticket, limpia el
+  // carrito y muestra el aviso de Telegram si lo hubo.
+  void _onCheckoutSuccess(CheckoutResult result) {
     setState(() {
-      _isProcessingPayment = true;
-    });
-    final double change = cashReceived - _total;
-
-    try {
-      final List<Map<String, dynamic>> ticketItems = _getCartAsMaps();
-      final double ticketTotal = _total;
-
-      await SalesRepository.instance.registerSale(_total, _cart);
-
-      final telegramError = await TicketTelegramService.instance.sendReceipt(
-        ticketItems,
-        ticketTotal,
-        cashReceived,
-        change,
-        isCard: false,
-        linkedChatId: _linkedChatId,
-        linkedUsername: _linkedUsername,
-      );
-
-      if (telegramError != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(telegramError),
-            backgroundColor: Colors.orange,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
-
-      await TicketPdfService.instance.printReceipt(
-        ticketItems,
-        ticketTotal,
-        cashReceived,
-        change,
-        isCard: false,
-        linkedUsername: _linkedUsername,
-      );
-
-      if (mounted) {
-        setState(() {
-          _cart.clear();
-          _total = 0.0;
-          _isProcessingPayment = false;
-          _cashController.clear();
-          _paymentErrorText = null;
-          _linkedChatId = null;
-          _linkedUsername = null;
-        });
-        showTicketReceiptDialog(
-          context,
-          items: ticketItems,
-          total: ticketTotal,
-          cashReceived: cashReceived,
-          change: change,
-          isCard: false,
-          linkedUsername: _linkedUsername,
-        );
-      }
-    } catch (e) {
-      setState(() {
-        _isProcessingPayment = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
-  }
-
-  // ================= PROCESAR VENTA CON TARJETA =================
-  Future<void> _processCardCheckout() async {
-    if (_cart.isEmpty) return;
-    setState(() {
-      _isProcessingPayment = true;
+      _cart.clear();
+      _total = 0.0;
+      _cashController.clear();
+      _linkedChatId = null;
+      _linkedUsername = null;
     });
 
-    try {
-      final List<Map<String, dynamic>> ticketItems = _getCartAsMaps();
-      final double ticketTotal = _total;
-
-      await SalesRepository.instance.registerSale(_total, _cart);
-
-      final telegramError = await TicketTelegramService.instance.sendReceipt(
-        ticketItems,
-        ticketTotal,
-        ticketTotal,
-        0.0,
-        isCard: true,
-        linkedChatId: _linkedChatId,
-        linkedUsername: _linkedUsername,
+    if (result.telegramWarning != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.telegramWarning!),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 5),
+        ),
       );
-
-      if (telegramError != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(telegramError),
-            backgroundColor: Colors.orange,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
-
-      await TicketPdfService.instance.printReceipt(
-        ticketItems,
-        ticketTotal,
-        ticketTotal,
-        0.0,
-        isCard: true,
-        linkedUsername: _linkedUsername,
-      );
-
-      if (mounted) {
-        setState(() {
-          _cart.clear();
-          _total = 0.0;
-          _isProcessingPayment = false;
-          _cashController.clear();
-          _paymentErrorText = null;
-          _linkedChatId = null;
-          _linkedUsername = null;
-        });
-        showTicketReceiptDialog(
-          context,
-          items: ticketItems,
-          total: ticketTotal,
-          cashReceived: ticketTotal,
-          change: 0.0,
-          isCard: true,
-          linkedUsername: _linkedUsername,
-        );
-      }
-    } catch (e) {
-      setState(() {
-        _isProcessingPayment = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
     }
+
+    showTicketReceiptDialog(
+      context,
+      items: result.items,
+      total: result.total,
+      cashReceived: result.cashReceived,
+      change: result.change,
+      isCard: result.isCard,
+      linkedUsername: result.linkedUsername,
+    );
   }
 
   // ================= BÚSQUEDA + ESCÁNER DE CÓDIGO DE BARRAS =================
@@ -367,8 +242,6 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
 
   // ================= SECCIÓN: BUSCADOR + CARRITO =================
   Widget _buildSearchAndCart(BuildContext context, {required bool expandCart}) {
-    // Adaptamos la lista de CartItem a Map si el widget heredado aún espera mapas,
-    // o se procesa directamente según tus widgets de UI.
     final List<Map<String, dynamic>> cartAsMaps = _getCartAsMaps();
 
     return CartAndSearchSection(
@@ -408,12 +281,16 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
 
   // ================= SECCIÓN: PANEL DE COBRO =================
   Widget _buildPaymentPanel(BuildContext context, {required bool isWide}) {
+    final checkoutState = ref.watch(checkoutControllerProvider);
+    final isProcessingPayment = checkoutState.isLoading;
+    final paymentErrorText = checkoutState.hasError ? checkoutState.error.toString() : null;
+
     return PaymentPanel(
       isWide: isWide,
-      isProcessingPayment: _isProcessingPayment,
+      isProcessingPayment: isProcessingPayment,
       total: _total,
       cashController: _cashController,
-      paymentErrorText: _paymentErrorText,
+      paymentErrorText: paymentErrorText,
       cartIsEmpty: _cart.isEmpty,
       onAddQuickCash: _addQuickCash,
       onSetExactAmount: () {
@@ -421,27 +298,63 @@ class _SalesTerminalScreenState extends State<SalesTerminalScreen> {
           _cashController.text = _total % 1 == 0
               ? _total.toStringAsFixed(0)
               : _total.toStringAsFixed(2);
-          _paymentErrorText = null;
         });
+        ref.read(checkoutControllerProvider.notifier).reset();
       },
       onClearCash: () {
-        setState(() {
-          _cashController.clear();
-          _paymentErrorText = null;
-        });
+        _cashController.clear();
+        ref.read(checkoutControllerProvider.notifier).reset();
       },
-      onSubmitCash: _processLateralCheckout,
+      onSubmitCash: (cashReceived) {
+        ref.read(checkoutControllerProvider.notifier).payCash(
+              total: _total,
+              cashReceived: cashReceived,
+              cartItems: _cart,
+              linkedChatId: _linkedChatId,
+              linkedUsername: _linkedUsername,
+            );
+      },
       onPayCash: () {
         double cash = double.tryParse(_cashController.text) ?? 0.0;
-        _processLateralCheckout(cash);
+        ref.read(checkoutControllerProvider.notifier).payCash(
+              total: _total,
+              cashReceived: cash,
+              cartItems: _cart,
+              linkedChatId: _linkedChatId,
+              linkedUsername: _linkedUsername,
+            );
       },
-      onPayCard: _processCardCheckout,
+      onPayCard: () {
+        ref.read(checkoutControllerProvider.notifier).payCard(
+              total: _total,
+              cartItems: _cart,
+              linkedChatId: _linkedChatId,
+              linkedUsername: _linkedUsername,
+            );
+      },
       onClearCart: _clearCart,
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Escucha el checkoutControllerProvider para reaccionar UNA sola vez
+    // cuando el cobro termina bien (loading -> data(null) con lastResult
+    // lleno): pinta el ticket y limpia el carrito. Los estados de
+    // loading/error ya se leen directo con ref.watch dentro de
+    // _buildPaymentPanel para pintar el botón/el texto de error.
+    ref.listen(checkoutControllerProvider, (previous, next) {
+      final wasLoading = previous?.isLoading ?? false;
+      if (wasLoading && next.hasValue && !next.hasError) {
+        final controller = ref.read(checkoutControllerProvider.notifier);
+        final result = controller.lastResult;
+        if (result != null) {
+          _onCheckoutSuccess(result);
+          controller.reset();
+        }
+      }
+    });
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       appBar: AppBar(
