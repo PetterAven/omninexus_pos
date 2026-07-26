@@ -28,7 +28,7 @@ void main() {
     // forma aislada, sin depender de tener internet ni credenciales reales.
     await Supabase.initialize(
       url: 'https://fake-project-para-pruebas.supabase.co',
-      anonKey:
+      publishableKey:
           'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
     );
   });
@@ -93,7 +93,7 @@ void main() {
       const double totalVenta = 142.50;
       const double pagoCliente = 200.00;
 
-      final double cambio = pagoCliente - totalVenta;
+      const double cambio = pagoCliente - totalVenta;
 
       expect(cambio, equals(57.50));
       expect(pagoCliente >= totalVenta, true);

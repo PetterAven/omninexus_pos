@@ -41,7 +41,7 @@ void showCreateUserDialog(
             ),
             const SizedBox(height: 15),
             DropdownButtonFormField<String>(
-              value: selectedRole,
+              initialValue: selectedRole,
               decoration: const InputDecoration(labelText: 'Puesto', prefixIcon: Icon(Icons.badge)),
               items: const [
                 DropdownMenuItem(value: 'Cajero', child: Text('Cajero')),
@@ -66,6 +66,7 @@ void showCreateUserDialog(
                   newPassword: passCtrl.text,
                   newRole: selectedRole,
                 );
+                if (!dialogContext.mounted) return;
                 Navigator.pop(dialogContext);
                 await onCreated();
                 if (!context.mounted) return;

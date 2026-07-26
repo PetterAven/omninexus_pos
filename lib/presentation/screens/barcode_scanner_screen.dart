@@ -6,7 +6,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 /// Inventario (botón junto al campo "Código de Barras" al dar de alta un
 /// producto). Al detectar un código, regresa el valor con Navigator.pop.
 class BarcodeScannerScreen extends StatefulWidget {
-  const BarcodeScannerScreen({Key? key}) : super(key: key);
+  const BarcodeScannerScreen({super.key});
 
   @override
   State<BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
@@ -149,7 +149,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                 color: Colors.white,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                shadows: [Shadow(blurRadius: 6, color: Colors.black.withOpacity(0.8))],
+                shadows: [Shadow(blurRadius: 6, color: Colors.black.withValues(alpha: 0.8))],
               ),
             ),
           ),
@@ -171,7 +171,7 @@ class _ScannerOverlayPainter extends CustomPainter {
     final cutoutPath = Path()..addRRect(RRect.fromRectAndRadius(scanWindow, const Radius.circular(16)));
     final overlayPath = Path.combine(PathOperation.difference, backgroundPath, cutoutPath);
 
-    canvas.drawPath(overlayPath, Paint()..color = Colors.black.withOpacity(0.45));
+    canvas.drawPath(overlayPath, Paint()..color = Colors.black.withValues(alpha: 0.45));
     canvas.drawRRect(
       RRect.fromRectAndRadius(scanWindow, const Radius.circular(16)),
       Paint()

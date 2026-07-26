@@ -18,7 +18,7 @@ import '../widgets/telegram_link_dialog.dart';
 class SalesTerminalScreen extends StatefulWidget {
   final String? userRole;
 
-  const SalesTerminalScreen({Key? key, this.userRole}) : super(key: key);
+  const SalesTerminalScreen({super.key, this.userRole});
 
   @override
   State<SalesTerminalScreen> createState() => _SalesTerminalScreenState();
