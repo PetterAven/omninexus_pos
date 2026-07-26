@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../data/repositories/auth_repository.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/auth_controller.dart';
 import 'sales_terminal_screen.dart';
 
-class LoginScreen extends StatefulWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -18,8 +19,6 @@ class _LoginScreenState extends State<LoginScreen> {
   // al presionar Enter, y para poder disparar el login con el teclado.
   final _usernameFocus = FocusNode();
   final _passwordFocus = FocusNode();
-
-  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -30,41 +29,21 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _login() async {
-    if (_isLoading) return; // evita doble submit si mantienen Enter presionado
+  void _login() {
+    final authState = ref.read(authControllerProvider);
+    if (authState.isLoading) return; // evita doble submit si mantienen Enter presionado
 
     final user = _usernameController.text.trim();
     final pass = _passwordController.text;
 
     if (user.isEmpty || pass.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor llena todos los campos'))
+        const SnackBar(content: Text('Por favor llena todos los campos')),
       );
       return;
     }
 
-    setState(() => _isLoading = true);
-    final userData = await AuthRepository.instance.loginUser(user, pass);
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-
-    if (userData != null) {
-      _usernameController.clear();
-      _passwordController.clear();
-      if (!mounted) return;
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => SalesTerminalScreen(userRole: userData.role),
-        ),
-      );
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usuario o contraseña incorrectos'))
-      );
-    }
+    ref.read(authControllerProvider.notifier).login(user, pass);
   }
 
   // 🛡️ El auto-registro público fue retirado por seguridad (Regla tipo Walmart):
@@ -74,6 +53,32 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Reacciona UNA sola vez cuando el login pasa de loading a
+    // data(AppUser) con éxito, y navega a la Terminal de Ventas. El
+    // login incorrecto llega como AsyncError y se muestra en el
+    // ref.watch de abajo (isLoading/errorText), no aquí.
+    ref.listen(authControllerProvider, (previous, next) {
+      final wasLoading = previous?.isLoading ?? false;
+      if (wasLoading && next.hasValue && next.value != null) {
+        final loggedUser = next.value!;
+        _usernameController.clear();
+        _passwordController.clear();
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => SalesTerminalScreen(userRole: loggedUser.role),
+          ),
+        );
+      } else if (!wasLoading && next.hasError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(next.error.toString().replaceFirst('Exception: ', ''))),
+        );
+      }
+    });
+
+    final authState = ref.watch(authControllerProvider);
+    final isLoading = authState.isLoading;
+
     return Scaffold(
       backgroundColor: const Color(0xFF232D37),
       body: Center(
@@ -126,7 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       onSubmitted: (_) => _login(),
                     ),
                     const SizedBox(height: 20),
-                    _isLoading
+                    isLoading
                         ? const CircularProgressIndicator()
                         : SizedBox(
                             width: double.infinity,
