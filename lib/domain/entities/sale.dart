@@ -16,4 +16,10 @@ class Sale {
         total: double.parse(map['total'].toString()),
         date: map['date'].toString(),
       );
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'total': total,
+        'date': date,
+      };
 }

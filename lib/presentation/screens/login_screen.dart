@@ -52,11 +52,11 @@ class _LoginScreenState extends State<LoginScreen> {
       _usernameController.clear();
       _passwordController.clear();
       if (!mounted) return;
-      
+
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => SalesTerminalScreen(userRole: userData['role']),
+          builder: (context) => SalesTerminalScreen(userRole: userData.role),
         ),
       );
     } else {

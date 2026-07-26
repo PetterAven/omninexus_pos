@@ -151,7 +151,7 @@ void main() {
 
       final loginOk = await authRepo.loginUser(testUser, testPassword);
       expect(loginOk, isNotNull);
-      expect(loginOk!['username'], equals(testUser));
+      expect(loginOk!.username, equals(testUser));
 
       final loginMal = await authRepo.loginUser(testUser, 'contraseña_incorrecta');
       expect(loginMal, isNull);

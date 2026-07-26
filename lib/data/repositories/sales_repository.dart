@@ -3,6 +3,9 @@ import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/constants.dart';
 import '../../core/sync_status.dart';
+import '../../domain/entities/cart_item.dart';
+import '../../domain/entities/sale.dart';
+import '../../domain/entities/sale_detail.dart';
 import '../datasources/local/app_database.dart';
 
 /// Repositorio de ventas: registrar una venta (encabezado + detalle +
@@ -14,9 +17,9 @@ class SalesRepository {
 
   final _supabase = Supabase.instance.client;
 
-  Future<void> registerSale(double total, List<Map<String, dynamic>> cartItems) async {
+  Future<Sale> registerSale(double total, List<CartItem> cartItems) async {
     final db = await AppDatabase.instance.database;
-    String isoDate = DateTime.now().toIso8601String();
+    final String isoDate = DateTime.now().toIso8601String();
     int? finalSaleId;
 
     // 1. Registrar venta en Supabase (Online)
@@ -33,20 +36,22 @@ class SalesRepository {
 
       finalSaleId = insertedSale['id'] as int;
 
-      for (var item in cartItems) {
-        await _supabase.from('sale_details').insert({
-          'sale_id': finalSaleId,
-          'product_code': item['code'].toString(),
-          'product_name': item['name'].toString(),
-          'price': double.parse(item['price'].toString()),
-          'quantity': int.parse(item['quantity'].toString()),
-        }).timeout(AppConstants.networkTimeout);
+      for (final item in cartItems) {
+        final detail = SaleDetail(
+          saleId: finalSaleId,
+          productCode: item.product.code,
+          productName: item.product.name,
+          price: item.product.price,
+          quantity: item.quantity,
+        );
+
+        await _supabase.from('sale_details').insert(detail.toInsertMap()).timeout(AppConstants.networkTimeout);
 
         // Disparador de decremento atómico seguro contra condiciones de carrera
         try {
           await _supabase.rpc('decrement_stock', params: {
-            'row_code': item['code'].toString(),
-            'quantity_to_sub': int.parse(item['quantity'].toString())
+            'row_code': item.product.code,
+            'quantity_to_sub': item.quantity,
           }).timeout(AppConstants.networkTimeout);
         } catch (_) {}
       }
@@ -57,29 +62,40 @@ class SalesRepository {
     }
 
     // 2. Registrar venta en SQLite Local de manera transaccional
-    await db.transaction((txn) async {
-      int localSaleId = await txn.insert('sales', {
-        if (finalSaleId != null) 'id': finalSaleId,
-        'total': total,
-        'date': isoDate,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    final int localSaleId = await db.transaction<int>((txn) async {
+      final int insertedId = await txn.insert(
+        'sales',
+        {
+          if (finalSaleId != null) 'id': finalSaleId,
+          'total': total,
+          'date': isoDate,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
 
-      for (var item in cartItems) {
-        await txn.insert('sale_details', {
-          'sale_id': finalSaleId ?? localSaleId,
-          'product_code': item['code'],
-          'product_name': item['name'],
-          'price': item['price'],
-          'quantity': item['quantity'],
-        });
+      final int saleId = finalSaleId ?? insertedId;
+
+      for (final item in cartItems) {
+        final detail = SaleDetail(
+          saleId: saleId,
+          productCode: item.product.code,
+          productName: item.product.name,
+          price: item.product.price,
+          quantity: item.quantity,
+        );
+        await txn.insert('sale_details', detail.toInsertMap());
 
         // Actualización directa del inventario local
         await txn.execute(
           'UPDATE products SET stock = stock - ? WHERE code = ?',
-          [item['quantity'], item['code']],
+          [item.quantity, item.product.code],
         );
       }
+
+      return saleId;
     });
+
+    return Sale(id: finalSaleId ?? localSaleId, total: total, date: isoDate);
   }
 
   /// Antes 'sale_details' nunca se volvía a bajar de Supabase -- solo se
@@ -94,19 +110,9 @@ class SalesRepository {
       if (cloudDetails.isNotEmpty) {
         final db = await AppDatabase.instance.database;
         final batch = db.batch();
-        for (var detail in cloudDetails) {
-          batch.insert(
-            'sale_details',
-            {
-              'id': detail['id'],
-              'sale_id': detail['sale_id'],
-              'product_code': detail['product_code'].toString(),
-              'product_name': detail['product_name'].toString(),
-              'price': double.parse(detail['price'].toString()),
-              'quantity': int.parse(detail['quantity'].toString()),
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+        for (final raw in cloudDetails) {
+          final detail = SaleDetail.fromMap(Map<String, dynamic>.from(raw));
+          batch.insert('sale_details', detail.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
         }
         await batch.commit(noResult: true);
       }
@@ -118,12 +124,13 @@ class SalesRepository {
   /// Desglose de productos de una venta específica, para mostrar en el
   /// corte de caja/historial. Lee de local -- que ya se mantiene al día
   /// gracias a _syncSaleDetails() llamado desde getSales().
-  Future<List<Map<String, dynamic>>> getSaleDetails(int saleId) async {
+  Future<List<SaleDetail>> getSaleDetails(int saleId) async {
     final db = await AppDatabase.instance.database;
-    return await db.query('sale_details', where: 'sale_id = ?', whereArgs: [saleId]);
+    final rows = await db.query('sale_details', where: 'sale_id = ?', whereArgs: [saleId]);
+    return rows.map(SaleDetail.fromMap).toList();
   }
 
-  Future<List<Map<String, dynamic>>> getSales() async {
+  Future<List<Sale>> getSales() async {
     try {
       final cloudSales = await _supabase
           .from('sales')
@@ -133,12 +140,9 @@ class SalesRepository {
 
       if (cloudSales.isNotEmpty) {
         final db = await AppDatabase.instance.database;
-        for (var sale in cloudSales) {
-          await db.insert('sales', {
-            'id': sale['id'],
-            'total': double.parse(sale['total'].toString()),
-            'date': sale['date'].toString(),
-          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        for (final raw in cloudSales) {
+          final sale = Sale.fromMap(Map<String, dynamic>.from(raw));
+          await db.insert('sales', sale.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }
       SyncStatus.lastSyncOk = true;
@@ -151,6 +155,7 @@ class SalesRepository {
     await _syncSaleDetails();
 
     final db = await AppDatabase.instance.database;
-    return await db.query('sales', orderBy: 'id DESC');
+    final rows = await db.query('sales', orderBy: 'id DESC');
+    return rows.map(Sale.fromMap).toList();
   }
 }

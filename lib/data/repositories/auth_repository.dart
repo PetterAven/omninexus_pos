@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/constants.dart';
 import '../../core/sync_status.dart';
+import '../../domain/entities/app_user.dart';
 import '../datasources/local/app_database.dart';
 
 /// Repositorio de autenticación y usuarios: login, alta, baja, y todo
@@ -15,19 +16,21 @@ class AuthRepository {
 
   final _supabase = Supabase.instance.client;
 
-  Future<List<Map<String, dynamic>>> getUsers() async {
+  Future<List<AppUser>> getUsers() async {
     try {
       final cloudUsers = await _supabase.from('users').select().timeout(AppConstants.networkTimeout);
       if (cloudUsers.isNotEmpty) {
         final db = await AppDatabase.instance.database;
-        for (var user in cloudUsers) {
-          await db.insert('users', user, conflictAlgorithm: ConflictAlgorithm.replace);
+        for (final raw in cloudUsers) {
+          final user = AppUser.fromMap(Map<String, dynamic>.from(raw));
+          await db.insert('users', user.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }
     } catch (_) {}
 
     final db = await AppDatabase.instance.database;
-    return await db.query('users');
+    final rows = await db.query('users');
+    return rows.map(AppUser.fromMap).toList();
   }
 
   /// Busca al usuario SOLO por su username (nunca por contraseña en la
@@ -36,8 +39,8 @@ class AuthRepository {
   /// hash bcrypt (cuentas creadas antes de este cambio), se re-guarda ya
   /// hasheada en ese mismo momento -- migración automática, sin script
   /// aparte ni pedirle a nadie que cambie su contraseña a mano.
-  Future<Map<String, dynamic>?> loginUser(String username, String password) async {
-    Map<String, dynamic>? user;
+  Future<AppUser?> loginUser(String username, String password) async {
+    AppUser? user;
 
     try {
       final cloudUser = await _supabase
@@ -46,22 +49,25 @@ class AuthRepository {
           .eq('username', username)
           .maybeSingle()
           .timeout(AppConstants.networkTimeout);
-      if (cloudUser != null) user = Map<String, dynamic>.from(cloudUser);
+      if (cloudUser != null) user = AppUser.fromMap(Map<String, dynamic>.from(cloudUser));
     } catch (_) {}
 
     if (user == null) {
       final db = await AppDatabase.instance.database;
       final maps = await db.query('users', where: 'username = ?', whereArgs: [username]);
-      if (maps.isNotEmpty) user = Map<String, dynamic>.from(maps.first);
+      if (maps.isNotEmpty) user = AppUser.fromMap(maps.first);
     }
 
     if (user == null) return null;
 
-    final storedPassword = user['password'].toString();
-    if (!_verifyPassword(password, storedPassword)) return null;
+    if (!_verifyPassword(password, user.password)) return null;
 
-    if (!_isBcryptHash(storedPassword)) {
-      await _rehashPassword(username, password);
+    if (!_isBcryptHash(user.password)) {
+      // _rehashPassword regresa el hash que efectivamente quedó
+      // guardado, así el usuario que devolvemos ya no carga la
+      // contraseña vieja en texto plano.
+      final newHash = await _rehashPassword(username, password);
+      user = AppUser(username: user.username, password: newHash, role: user.role);
     }
 
     return user;
@@ -82,13 +88,14 @@ class AuthRepository {
     return plainInput == stored;
   }
 
-  Future<void> _rehashPassword(String username, String plainPassword) async {
+  Future<String> _rehashPassword(String username, String plainPassword) async {
     final hashed = BCrypt.hashpw(plainPassword, BCrypt.gensalt());
     try {
       await _supabase.from('users').update({'password': hashed}).eq('username', username).timeout(AppConstants.networkTimeout);
     } catch (_) {}
     final db = await AppDatabase.instance.database;
     await db.update('users', {'password': hashed}, where: 'username = ?', whereArgs: [username]);
+    return hashed;
   }
 
   /// Registra un usuario aplicando validación de jerarquía empresarial
@@ -103,18 +110,18 @@ class AuthRepository {
       throw Exception('Acceso Denegado: Tu rol actual ($currentOperatorRole) no tiene autorización para dar de alta cuentas.');
     }
 
-    final Map<String, dynamic> userData = {
-      'username': newUsername,
+    final newUser = AppUser(
+      username: newUsername,
       // Se hashea con bcrypt antes de guardarse; nunca se vuelve a
       // escribir una contraseña en texto plano en la BD.
-      'password': BCrypt.hashpw(newPassword, BCrypt.gensalt()),
-      'role': newRole,
-    };
+      password: BCrypt.hashpw(newPassword, BCrypt.gensalt()),
+      role: newRole,
+    );
 
     // Subir a la nube primero
     bool syncedToCloud = true;
     try {
-      await _supabase.from('users').insert(userData).timeout(AppConstants.networkTimeout);
+      await _supabase.from('users').insert(newUser.toMap()).timeout(AppConstants.networkTimeout);
     } catch (e) {
       syncedToCloud = false;
       debugPrint("Servidor inaccesible. Creando registro local temporal. $e");
@@ -133,7 +140,7 @@ class AuthRepository {
       throw Exception('El identificador de usuario ya se encuentra registrado.');
     }
 
-    final result = await db.insert('users', userData, conflictAlgorithm: ConflictAlgorithm.replace);
+    final result = await db.insert('users', newUser.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
     SyncStatus.lastSyncOk = syncedToCloud;
     return result;
   }

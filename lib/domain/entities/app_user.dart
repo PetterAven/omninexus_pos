@@ -1,4 +1,6 @@
-
+/// Entidad de dominio: un usuario del sistema (cajero, administrador,
+/// etc). El campo `password` siempre contiene el hash bcrypt, nunca
+/// texto plano.
 class AppUser {
   final String username;
   final String password;
@@ -15,4 +17,10 @@ class AppUser {
         password: map['password'].toString(),
         role: map['role'].toString(),
       );
+
+  Map<String, dynamic> toMap() => {
+        'username': username,
+        'password': password,
+        'role': role,
+      };
 }

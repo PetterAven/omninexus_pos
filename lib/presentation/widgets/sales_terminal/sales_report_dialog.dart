@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../../../core/sync_status.dart';
 import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/sales_repository.dart';
+import '../../../domain/entities/app_user.dart';
+import '../../../domain/entities/sale.dart';
+import '../../../domain/entities/sale_detail.dart';
 
 /// Diálogo para crear una nueva cuenta de empleado (cajero/administrador).
 ///
@@ -98,12 +101,12 @@ void showCreateUserDialog(
 /// su propio `StatefulBuilder` interno para refrescar sales/users sin
 /// cerrar el diálogo.
 void showSalesReportDialog(BuildContext context, {required String userRole}) async {
-  List<Map<String, dynamic>> sales = await SalesRepository.instance.getSales();
-  List<Map<String, dynamic>> users = await AuthRepository.instance.getUsers();
+  List<Sale> sales = await SalesRepository.instance.getSales();
+  List<AppUser> users = await AuthRepository.instance.getUsers();
 
   double granTotal = 0.0;
   for (var sale in sales) {
-    granTotal += sale['total'] ?? 0.0;
+    granTotal += sale.total;
   }
 
   if (!context.mounted) return;
@@ -137,7 +140,7 @@ void showSalesReportDialog(BuildContext context, {required String userRole}) asy
                       final freshUsers = await AuthRepository.instance.getUsers();
                       double freshTotal = 0.0;
                       for (var sale in freshSales) {
-                        freshTotal += sale['total'] ?? 0.0;
+                        freshTotal += sale.total;
                       }
                       final syncOk = SyncStatus.lastSyncOk;
                       setDialogState(() {
@@ -197,16 +200,16 @@ void showSalesReportDialog(BuildContext context, {required String userRole}) asy
                                     itemCount: sales.length,
                                     itemBuilder: (context, index) {
                                       final sale = sales[index];
-                                      final saleId = sale['id'] as int;
+                                      final saleId = sale.id;
                                       return ExpansionTile(
                                         leading: const Icon(Icons.receipt_long, color: Colors.blueGrey),
                                         title: Text('Ticket ID: #$saleId'),
-                                        subtitle: Text(sale['date'].toString().substring(11, 19)),
-                                        trailing: Text('\$${(sale['total'] ?? 0.0).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                        subtitle: Text(sale.date.substring(11, 19)),
+                                        trailing: Text('\$${sale.total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                                         // Al desplegar el ticket se muestra el desglose de
                                         // productos vendidos, sincronizado desde Supabase.
                                         children: [
-                                          FutureBuilder<List<Map<String, dynamic>>>(
+                                          FutureBuilder<List<SaleDetail>>(
                                             future: SalesRepository.instance.getSaleDetails(saleId),
                                             builder: (context, snapshot) {
                                               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -228,15 +231,15 @@ void showSalesReportDialog(BuildContext context, {required String userRole}) asy
                                               }
                                               return Column(
                                                 children: details.map((item) {
-                                                  final qty = item['quantity'] ?? 0;
-                                                  final price = (item['price'] ?? 0.0) as num;
+                                                  final qty = item.quantity;
+                                                  final price = item.price;
                                                   return Padding(
                                                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                                                     child: Row(
                                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                       children: [
                                                         Expanded(
-                                                          child: Text('${item['product_name']} x$qty', style: const TextStyle(fontSize: 13)),
+                                                          child: Text('${item.productName} x$qty', style: const TextStyle(fontSize: 13)),
                                                         ),
                                                         Text('\$${(price * qty).toStringAsFixed(2)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                                                       ],
@@ -280,15 +283,15 @@ void showSalesReportDialog(BuildContext context, {required String userRole}) asy
                                         final user = users[index];
                                         return ListTile(
                                           leading: const Icon(Icons.person_outline, color: Color(0xFF232D37)),
-                                          title: Text(user['username'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                                          subtitle: Text('Puesto: ${user['role']}'),
-                                          trailing: user['role'] == 'Administrador' || user['username'] == 'admin'
+                                          title: Text(user.username, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                          subtitle: Text('Puesto: ${user.role}'),
+                                          trailing: user.role == 'Administrador' || user.username == 'admin'
                                               ? const Tooltip(message: 'Cuenta Raíz Protegida', child: Icon(Icons.shield, color: Colors.amber))
                                               : IconButton(
                                                   icon: const Icon(Icons.person_remove, color: Colors.redAccent),
                                                   tooltip: 'Dar de baja inmediatamente',
                                                   onPressed: () async {
-                                                    await AuthRepository.instance.deleteUser(user['username']);
+                                                    await AuthRepository.instance.deleteUser(user.username);
                                                     final updatedUsers = await AuthRepository.instance.getUsers();
                                                     setDialogState(() { users = updatedUsers; });
                                                   },

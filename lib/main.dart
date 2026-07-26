@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart'; // <--- AGREGADO
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'presentation/screens/login_screen.dart';
 
@@ -36,7 +37,12 @@ void main() async {
     }
   }
 
-  runApp(const OmniNexusApp());
+  // CORREGIDO: envuelto en ProviderScope para habilitar Riverpod en toda la app
+  runApp(
+    const ProviderScope(
+      child: OmniNexusApp(),
+    ),
+  );
 }
 
 class OmniNexusApp extends StatelessWidget {
@@ -52,11 +58,6 @@ class OmniNexusApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2C3E50)),
         useMaterial3: true,
       ),
-      // CORREGIDO: se elimina el AuthWrapper. Tu login real es manual
-      // contra la tabla 'users' (DatabaseHelper.loginUser), no usa
-      // Supabase Auth (_supabase.auth), así que ese wrapper nunca hacía
-      // nada útil — solo agregaba una consulta a una columna 'id' que tu
-      // tabla 'users' ni siquiera tiene. Vamos directo al login real.
       home: const LoginScreen(),
     );
   }
