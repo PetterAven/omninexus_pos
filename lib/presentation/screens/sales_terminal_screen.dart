@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../core/sync_status.dart';
 import '../../data/repositories/product_repository.dart';
 import '../../data/repositories/sales_repository.dart';
-import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/sync_repository.dart';
 import '../../services/ticket_telegram_service.dart';
 import '../../services/ticket_pdf_service.dart';
