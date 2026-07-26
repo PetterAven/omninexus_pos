@@ -1,26 +1,20 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import '../core/utils/currency_to_words.dart';
 
 /// Envía el comprobante de una venta al chat de Telegram vinculado (o al
 /// chat general de la tienda si no hay cliente vinculado).
 ///
-/// Extraído de `SalesTerminalScreen._sendTicketToTelegram`. Es lógica de
-/// red pura -- no depende de `BuildContext` ni de `setState` -- así que
-/// vive en `services/` junto a `TelegramService` (que resuelve otra parte
-/// del mismo dominio: la vinculación de clientes).
-///
-/// TODO(seguridad): el bot token y chat id de fallback siguen hardcodeados
-/// aquí, tal como estaban en el widget original. Deberían salir a
-/// variables de entorno (`--dart-define` o `flutter_dotenv`) antes de
-/// subir a producción -- quedó fuera del alcance de esta extracción para
-/// no mezclar "mover código" con "cambiar comportamiento".
+/// Refactorizado para usar variables de entorno vía `flutter_dotenv` 
+/// evitando la exposición de tokens y claves en el repositorio.
 class TicketTelegramService {
   static final TicketTelegramService instance = TicketTelegramService._init();
   TicketTelegramService._init();
 
-  final String _botToken = '8903317057:AAEcJArqTDlU-_EmTKhhbEyiyVLo1CzVcq4';
-  final String _fallbackChatId = '8940573921';
+  // Obtiene los valores desde el archivo .env con valores por defecto seguros
+  String get _botToken => dotenv.env['TELEGRAM_BOT_TOKEN'] ?? '';
+  String get _fallbackChatId => dotenv.env['TELEGRAM_CHAT_ID'] ?? '';
 
   /// Devuelve `null` si el envío fue exitoso (HTTP 200), o un mensaje de
   /// error legible para mostrar en un SnackBar si algo falló.
@@ -33,7 +27,10 @@ class TicketTelegramService {
     String? linkedChatId,
     String? linkedUsername,
   }) async {
-    if (_botToken.startsWith('TU_')) return null;
+    if (_botToken.isEmpty || _botToken.startsWith('TU_')) {
+      debugPrint('⚠️ Token de Telegram no configurado en .env');
+      return '⚠️ No se configuró el token de Telegram en el archivo .env';
+    }
 
     double subtotalImpuestos = total / 1.16;
     double ivaCalculado = total - subtotalImpuestos;
@@ -77,6 +74,10 @@ class TicketTelegramService {
     buffer.writeln('¡Venta realizada con éxito!');
 
     final destinoChatId = linkedChatId ?? _fallbackChatId;
+    if (destinoChatId.isEmpty) {
+      return '⚠️ No hay un Chat ID de destino configurado para Telegram.';
+    }
+
     final url = Uri.parse('https://api.telegram.org/bot$_botToken/sendMessage');
 
     try {
@@ -86,9 +87,6 @@ class TicketTelegramService {
         'parse_mode': 'Markdown',
       });
 
-      // CORREGIDO: http.post no lanza excepción si Telegram responde 400/401 —
-      // esas son respuestas HTTP "válidas", solo que de error. Antes esto se
-      // ignoraba por completo y el ticket se perdía sin que nadie se enterara.
       if (response.statusCode != 200) {
         debugPrint('❌ Telegram rechazó el ticket (${response.statusCode}): ${response.body}');
         return '⚠️ Telegram no aceptó el ticket (${response.statusCode}). Revisa el token o el formato del mensaje.';
