@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:omninexus_pos/data/datasources/local/app_database.dart';
 import 'package:omninexus_pos/data/repositories/product_repository.dart';
 import 'package:omninexus_pos/data/repositories/auth_repository.dart';
+import 'package:omninexus_pos/domain/entities/product.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -40,47 +41,47 @@ void main() {
     });
 
     test('1. Inserta un producto y lo encuentra por código', () async {
-      final row = {
-        'code': '75010001',
-        'name': 'Refresco 600ml',
-        'price': 18.50,
-        'stock': 50,
-      };
+      const product = Product(
+        code: '75010001',
+        name: 'Refresco 600ml',
+        price: 18.50,
+        stock: 50,
+      );
 
-      await productRepo.insertProduct(row);
+      await productRepo.insertProduct(product);
 
       final results = await productRepo.searchProducts('75010001');
       expect(results.isNotEmpty, true);
-      expect(results.first['name'], equals('Refresco 600ml'));
-      expect(results.first['price'], equals(18.50));
+      expect(results.first.name, equals('Refresco 600ml'));
+      expect(results.first.price, equals(18.50));
     });
 
     test('2. Actualiza el stock de un producto existente', () async {
-      await productRepo.insertProduct({
-        'code': '75010002',
-        'name': 'Galletas',
-        'price': 12.0,
-        'stock': 20,
-      });
+      await productRepo.insertProduct(const Product(
+        code: '75010002',
+        name: 'Galletas',
+        price: 12.0,
+        stock: 20,
+      ));
 
-      await productRepo.updateProduct({
-        'code': '75010002',
-        'name': 'Galletas',
-        'price': 12.0,
-        'stock': 15,
-      });
+      await productRepo.updateProduct(const Product(
+        code: '75010002',
+        name: 'Galletas',
+        price: 12.0,
+        stock: 15,
+      ));
 
       final results = await productRepo.searchProducts('Galletas');
-      expect(results.first['stock'], equals(15));
+      expect(results.first.stock, equals(15));
     });
 
     test('3. Elimina un producto y ya no aparece en la búsqueda', () async {
-      await productRepo.insertProduct({
-        'code': '75010003',
-        'name': 'Agua 1L',
-        'price': 15.0,
-        'stock': 30,
-      });
+      await productRepo.insertProduct(const Product(
+        code: '75010003',
+        name: 'Agua 1L',
+        price: 15.0,
+        stock: 30,
+      ));
 
       await productRepo.deleteProduct('75010003');
 

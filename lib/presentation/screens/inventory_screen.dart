@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/sync_status.dart';
 import '../../data/repositories/product_repository.dart';
+import '../../domain/entities/product.dart';
 import 'sales_terminal_screen.dart'; // Importación necesaria para la navegación
 
 class InventoryScreen extends StatefulWidget {
@@ -13,7 +14,7 @@ class InventoryScreen extends StatefulWidget {
 }
 
 class _InventoryScreenState extends State<InventoryScreen> {
-  List<Map<String, dynamic>> _products = [];
+  List<Product> _products = [];
   bool _isLoading = true;
 
   final _codeController = TextEditingController();
@@ -115,19 +116,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
               // de intentar guardar, en vez de dejar que Supabase truene por
               // llave duplicada sin explicación clara para el usuario.
               final code = _codeController.text.trim();
-              final yaExiste = _products.any((p) => p['code'].toString() == code);
+              final yaExiste = _products.any((p) => p.code == code);
               if (yaExiste) {
                 Navigator.pop(context);
                 _showSnackBar('❌ Ese código ya existe. Usa "Editar" en el producto o elige un código distinto.', Colors.red);
                 return;
               }
-              
-              final newProduct = {
-                'code': code,
-                'name': _nameController.text.trim(),
-                'price': double.tryParse(_priceController.text) ?? 0.0,
-                'stock': int.tryParse(_stockController.text) ?? 0,
-              };
+
+              final newProduct = Product(
+                code: code,
+                name: _nameController.text.trim(),
+                price: double.tryParse(_priceController.text) ?? 0.0,
+                stock: int.tryParse(_stockController.text) ?? 0,
+              );
 
               try {
                 Navigator.pop(context);
@@ -151,20 +152,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  void _showEditDialog(Map<String, dynamic> product) {
+  void _showEditDialog(Product product) {
     if (widget.userRole != 'Administrador' && widget.userRole != 'admin') {
       _showSnackBar('⚠️ Acceso denegado: Solo los Administradores pueden editar productos.', Colors.red);
       return;
     }
 
-    final nameEdit = TextEditingController(text: product['name'].toString());
-    final priceEdit = TextEditingController(text: product['price'].toString());
-    final stockEdit = TextEditingController(text: product['stock'].toString());
+    final nameEdit = TextEditingController(text: product.name);
+    final priceEdit = TextEditingController(text: product.price.toString());
+    final stockEdit = TextEditingController(text: product.stock.toString());
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Editar ${product['name']}'),
+        title: Text('Editar ${product.name}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -191,13 +192,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              final updatedProduct = {
-                'code': product['code'].toString(), 
-                'name': nameEdit.text.trim(),
-                'price': double.tryParse(priceEdit.text) ?? product['price'],
-                'stock': int.tryParse(stockEdit.text) ?? product['stock'],
-              };
-              
+              final updatedProduct = Product(
+                code: product.code,
+                name: nameEdit.text.trim(),
+                price: double.tryParse(priceEdit.text) ?? product.price,
+                stock: int.tryParse(stockEdit.text) ?? product.stock,
+              );
+
               try {
                 Navigator.pop(context);
                 await ProductRepository.instance.updateProduct(updatedProduct);
@@ -323,8 +324,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           itemCount: _products.length,
                           itemBuilder: (context, index) {
                             final product = _products[index];
-                            final double price = ((product['price'] ?? 0.0) as num).toDouble();
-                            
+                            final double price = product.price;
+
                             return Card(
                               elevation: 2,
                               margin: const EdgeInsets.symmetric(vertical: 6),
@@ -340,11 +341,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                   child: const Icon(Icons.archive, color: Color(0xFF2C3E50)),
                                 ),
                                 title: Text(
-                                  product['name']?.toString() ?? 'Sin nombre',
+                                  product.name,
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                                 ),
                                 subtitle: Text(
-                                  'Código: ${product['code']}\nStock: ${product['stock']}',
+                                  'Código: ${product.code}\nStock: ${product.stock}',
                                   style: const TextStyle(height: 1.3),
                                 ),
                                 trailing: Row(
@@ -362,7 +363,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                       ),
                                       IconButton(
                                         icon: const Icon(Icons.delete, color: Colors.red),
-                                        onPressed: () => _confirmDelete(product['code'].toString()),
+                                        onPressed: () => _confirmDelete(product.code),
                                       ),
                                     ]
                                   ],
