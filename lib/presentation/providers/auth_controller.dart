@@ -41,3 +41,15 @@ class AuthController extends AsyncNotifier<AppUser?> {
 
 final authControllerProvider =
     AsyncNotifierProvider<AuthController, AppUser?>(AuthController.new);
+
+/// Derivado de authControllerProvider: expone directamente el AppUser?
+/// vigente, sin la envoltura de AsyncValue (loading/error solo le
+/// importan a LoginScreen mientras se autentica). Es lo que el resto
+/// de las pantallas deben leer para saber "quién está logueado y con
+/// qué rol", en vez de recibir userRole a mano por constructor.
+///
+/// - null     -> nadie ha iniciado sesión, o el login está en curso/falló
+/// - AppUser  -> sesión activa
+final currentUserProvider = Provider<AppUser?>((ref) {
+  return ref.watch(authControllerProvider).value;
+});

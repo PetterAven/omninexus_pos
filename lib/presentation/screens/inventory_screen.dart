@@ -279,7 +279,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => SalesTerminalScreen(userRole: widget.userRole),
+                  // CORREGIDO: SalesTerminalScreen ya no recibe userRole por
+                  // constructor; lo lee sola de currentUserProvider.
+                  builder: (context) => const SalesTerminalScreen(),
                 ),
               );
             },

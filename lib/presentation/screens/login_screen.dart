@@ -60,13 +60,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     ref.listen(authControllerProvider, (previous, next) {
       final wasLoading = previous?.isLoading ?? false;
       if (wasLoading && next.hasValue && next.value != null) {
-        final loggedUser = next.value!;
         _usernameController.clear();
         _passwordController.clear();
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => SalesTerminalScreen(userRole: loggedUser.role),
+            // CORREGIDO: ya no pasamos userRole a mano; SalesTerminalScreen
+            // lo lee directo de currentUserProvider (derivado de
+            // authControllerProvider), así que aquí ya no hace falta.
+            builder: (context) => const SalesTerminalScreen(),
           ),
         );
       } else if (!wasLoading && next.hasError) {

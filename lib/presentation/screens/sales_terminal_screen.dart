@@ -4,6 +4,7 @@ import '../../data/repositories/product_repository.dart';
 import '../../data/repositories/sync_repository.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/product.dart';
+import '../providers/auth_controller.dart';
 import '../providers/checkout_controller.dart';
 import 'inventory_screen.dart';
 import 'barcode_scanner_screen.dart';
@@ -15,9 +16,7 @@ import '../widgets/sales_terminal/sales_report_dialog.dart';
 import '../widgets/telegram_link_dialog.dart';
 
 class SalesTerminalScreen extends ConsumerStatefulWidget {
-  final String? userRole;
-
-  const SalesTerminalScreen({super.key, this.userRole});
+  const SalesTerminalScreen({super.key});
 
   @override
   ConsumerState<SalesTerminalScreen> createState() => _SalesTerminalScreenState();
@@ -338,6 +337,13 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // CORREGIDO: el rol ya no llega por constructor (widget.userRole);
+    // se lee directo del provider derivado de la sesión activa. Como es
+    // una variable local de build(), los closures de abajo (onPressed,
+    // onSelected, etc.) la capturan sin problema y se actualiza sola
+    // si el usuario logueado cambia.
+    final userRole = ref.watch(currentUserProvider)?.role;
+
     // Escucha el checkoutControllerProvider para reaccionar UNA sola vez
     // cuando el cobro termina bien (loading -> data(null) con lastResult
     // lleno): pinta el ticket y limpia el carrito. Los estados de
@@ -364,7 +370,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
             return Text(
               isNarrow
                   ? 'Ventas'
-                  : 'Terminal de Ventas - Modulo: ${widget.userRole ?? "General"}',
+                  : 'Terminal de Ventas - Modulo: ${userRole ?? "General"}',
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -418,7 +424,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                       tooltip: 'Corte y Personal',
                       onPressed: () => showSalesReportDialog(
                         context,
-                        userRole: widget.userRole ?? 'Cajero',
+                        userRole: userRole ?? 'Cajero',
                       ),
                     ),
                     IconButton(
@@ -429,7 +435,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (_) => InventoryScreen(
-                              userRole: widget.userRole ?? 'Cajero',
+                              userRole: userRole ?? 'Cajero',
                             ),
                           ),
                         );
@@ -450,7 +456,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                     case 'corte':
                       showSalesReportDialog(
                         context,
-                        userRole: widget.userRole ?? 'Cajero',
+                        userRole: userRole ?? 'Cajero',
                       );
                       break;
                     case 'inventario':
@@ -458,7 +464,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                         context,
                         MaterialPageRoute(
                           builder: (_) => InventoryScreen(
-                            userRole: widget.userRole ?? 'Cajero',
+                            userRole: userRole ?? 'Cajero',
                           ),
                         ),
                       );
