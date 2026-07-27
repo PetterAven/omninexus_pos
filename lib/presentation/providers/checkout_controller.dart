@@ -3,6 +3,7 @@ import '../../data/repositories/sales_repository.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../services/ticket_telegram_service.dart';
 import '../../services/ticket_pdf_service.dart';
+import 'sales_controller.dart';
 
 /// Lo que la pantalla necesita para pintar el ticket y el snackbar de
 /// aviso una vez que el cobro terminó bien. Se guarda aparte del
@@ -98,6 +99,13 @@ class CheckoutController extends AsyncNotifier<void> {
       final change = isCard ? 0.0 : cashReceived - total;
 
       await SalesRepository.instance.registerSale(total, cartItems);
+
+      // CORREGIDO: salesControllerProvider cachea su AsyncNotifier<List<Sale>>
+      // hasta que algo lo invalide -- sin esto, el Panel de Control seguía
+      // mostrando el corte de caja de antes de esta venta hasta que la app
+      // se reiniciaba. invalidate() lo marca sucio; se recalcula solo la
+      // próxima vez que algo lo escuche (p.ej. al abrir showSalesReportDialog).
+      ref.invalidate(salesControllerProvider);
 
       final telegramError = await TicketTelegramService.instance.sendReceipt(
         ticketItems,

@@ -1,32 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/sync_status.dart';
-import '../../data/repositories/product_repository.dart';
 import '../../domain/entities/product.dart';
+import '../providers/auth_controller.dart';
+import '../providers/product_controller.dart';
 import 'sales_terminal_screen.dart'; // Importación necesaria para la navegación
 
-class InventoryScreen extends StatefulWidget {
-  final String userRole; 
-
-  const InventoryScreen({super.key, required this.userRole});
+class InventoryScreen extends ConsumerStatefulWidget {
+  const InventoryScreen({super.key});
 
   @override
-  State<InventoryScreen> createState() => _InventoryScreenState();
+  ConsumerState<InventoryScreen> createState() => _InventoryScreenState();
 }
 
-class _InventoryScreenState extends State<InventoryScreen> {
-  List<Product> _products = [];
-  bool _isLoading = true;
-
+class _InventoryScreenState extends ConsumerState<InventoryScreen> {
+  // CORREGIDO: _products y _isLoading ya no viven aquí -- se movieron a
+  // productControllerProvider (AsyncNotifier<List<Product>>). Este
+  // State ya solo guarda los TextEditingController de los formularios.
   final _codeController = TextEditingController();
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
   final _stockController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshInventory();
-  }
 
   @override
   void dispose() {
@@ -37,17 +31,18 @@ class _InventoryScreenState extends State<InventoryScreen> {
     super.dispose();
   }
 
-  Future<void> _refreshInventory() async {
-    setState(() => _isLoading = true);
-    final data = await ProductRepository.instance.getProducts();
-    if (!mounted) return;
-    setState(() {
-      _products = data;
-      _isLoading = false;
-    });
+  String? get _userRole => ref.read(currentUserProvider)?.role;
 
-    // CORREGIDO: si getProducts() no pudo sincronizar (red lenta/caída),
-    // avisamos aquí en vez de dejarlo silencioso.
+  bool get _isAdmin => _userRole == 'Administrador' || _userRole == 'admin';
+
+  Future<void> _refreshInventory() async {
+    await ref.read(productControllerProvider.notifier).refresh();
+    if (!mounted) return;
+
+    // CORREGIDO: antes se comprobaba SyncStatus.lastSyncOk justo después
+    // de setState() con los datos ya cargados; ahora que refresh() del
+    // controller ya hizo el await de getProducts(), el chequeo sigue en
+    // el mismo punto lógico -- solo movió de lugar.
     if (!SyncStatus.lastSyncOk && mounted) {
       _showSnackBar('⚠️ No se pudo conectar con Supabase. Mostrando datos guardados en este equipo.', Colors.orange);
     }
@@ -64,7 +59,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   void _showAddProductDialog() {
-    if (widget.userRole != 'Administrador' && widget.userRole != 'admin') {
+    if (!_isAdmin) {
       _showSnackBar('⚠️ Acceso denegado: Solo los Administradores pueden registrar productos.', Colors.red);
       return;
     }
@@ -112,17 +107,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
             onPressed: () async {
               if (_codeController.text.isEmpty || _nameController.text.isEmpty) return;
 
-              // CORREGIDO: si el código ya existe localmente, avisamos antes
-              // de intentar guardar, en vez de dejar que Supabase truene por
-              // llave duplicada sin explicación clara para el usuario.
               final code = _codeController.text.trim();
-              final yaExiste = _products.any((p) => p.code == code);
-              if (yaExiste) {
-                Navigator.pop(context);
-                _showSnackBar('❌ Ese código ya existe. Usa "Editar" en el producto o elige un código distinto.', Colors.red);
-                return;
-              }
-
               final newProduct = Product(
                 code: code,
                 name: _nameController.text.trim(),
@@ -130,20 +115,30 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 stock: int.tryParse(_stockController.text) ?? 0,
               );
 
+              // CORREGIDO: la validación de código duplicado ahora vive
+              // en ProductController.addProduct() (contra su propio
+              // estado ya cargado), en vez de revisar _products a mano
+              // aquí. Solo interpretamos el resultado.
               try {
+                final result = await ref.read(productControllerProvider.notifier).addProduct(newProduct);
+                if (!context.mounted) return;
                 Navigator.pop(context);
-                await ProductRepository.instance.insertProduct(newProduct);
+
+                if (result == ProductSaveResult.duplicateCode) {
+                  _showSnackBar('❌ Ese código ya existe. Usa "Editar" en el producto o elige un código distinto.', Colors.red);
+                  return;
+                }
+
                 if (SyncStatus.lastSyncOk) {
                   _showSnackBar('¡Producto guardado y sincronizado con Supabase!', Colors.green);
                 } else {
                   _showSnackBar('⚠️ Guardado solo en este equipo: no se pudo sincronizar con Supabase (revisa tu conexión).', Colors.orange);
                 }
               } catch (e) {
+                if (!context.mounted) return;
+                Navigator.pop(context);
                 _showSnackBar('❌ Error al guardar: $e', Colors.red);
               }
-              
-              if (!mounted) return;
-              _refreshInventory();
             },
             child: const Text('Guardar'),
           ),
@@ -153,7 +148,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   void _showEditDialog(Product product) {
-    if (widget.userRole != 'Administrador' && widget.userRole != 'admin') {
+    if (!_isAdmin) {
       _showSnackBar('⚠️ Acceso denegado: Solo los Administradores pueden editar productos.', Colors.red);
       return;
     }
@@ -200,19 +195,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
               );
 
               try {
+                await ref.read(productControllerProvider.notifier).updateProduct(updatedProduct);
+                if (!context.mounted) return;
                 Navigator.pop(context);
-                await ProductRepository.instance.updateProduct(updatedProduct);
                 if (SyncStatus.lastSyncOk) {
                   _showSnackBar('¡Producto actualizado y sincronizado con Supabase!', Colors.green);
                 } else {
                   _showSnackBar('⚠️ Actualizado solo en este equipo: no se pudo sincronizar con Supabase.', Colors.orange);
                 }
               } catch (e) {
+                if (!context.mounted) return;
+                Navigator.pop(context);
                 _showSnackBar('❌ Error al actualizar: $e', Colors.red);
               }
-              
-              if (!mounted) return;
-              _refreshInventory();
             },
             child: const Text('Actualizar'),
           ),
@@ -222,7 +217,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   void _confirmDelete(String code) {
-    if (widget.userRole != 'Administrador' && widget.userRole != 'admin') {
+    if (!_isAdmin) {
       _showSnackBar('⚠️ Acceso denegado: Solo los Administradores pueden eliminar productos.', Colors.red);
       return;
     }
@@ -240,19 +235,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
           TextButton(
             onPressed: () async {
               try {
+                await ref.read(productControllerProvider.notifier).deleteProduct(code);
+                if (!context.mounted) return;
                 Navigator.pop(context);
-                await ProductRepository.instance.deleteProduct(code);
                 if (SyncStatus.lastSyncOk) {
                   _showSnackBar('Producto eliminado con éxito (local y Supabase).', Colors.blue);
                 } else {
                   _showSnackBar('⚠️ Eliminado solo en este equipo: no se pudo sincronizar con Supabase.', Colors.orange);
                 }
               } catch (e) {
+                if (!context.mounted) return;
+                Navigator.pop(context);
                 _showSnackBar('❌ Error al eliminar: $e', Colors.red);
               }
-              
-              if (!mounted) return;
-              _refreshInventory();
             },
             child: const Text('Eliminar', style: TextStyle(color: Colors.red)),
           ),
@@ -263,6 +258,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final userRole = ref.watch(currentUserProvider)?.role;
+    final isAdmin = userRole == 'Administrador' || userRole == 'admin';
+
+    // CORREGIDO: en vez de _isLoading/_products locales, se lee el
+    // AsyncValue del controller directo. AsyncValue.when() cubre los
+    // tres casos (loading/error/data) que antes se manejaban a mano con
+    // el ternario _isLoading ? ... : _products.isEmpty ? ... : ListView.
+    final productsAsync = ref.watch(productControllerProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Control de Inventario', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -279,8 +283,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  // CORREGIDO: SalesTerminalScreen ya no recibe userRole por
-                  // constructor; lo lee sola de currentUserProvider.
                   builder: (context) => const SalesTerminalScreen(),
                 ),
               );
@@ -303,7 +305,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   'Productos en Existencia',
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50)),
                 ),
-                if (widget.userRole == 'Administrador' || widget.userRole == 'admin')
+                if (isAdmin)
                   ElevatedButton.icon(
                     onPressed: _showAddProductDialog,
                     icon: const Icon(Icons.add),
@@ -318,62 +320,69 @@ class _InventoryScreenState extends State<InventoryScreen> {
             ),
             const SizedBox(height: 20),
             Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _products.isEmpty
-                      ? const Center(child: Text('No hay productos registrados.'))
-                      : ListView.builder(
-                          itemCount: _products.length,
-                          itemBuilder: (context, index) {
-                            final product = _products[index];
-                            final double price = product.price;
+              child: productsAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stackTrace) => Center(
+                  child: Text('No se pudo cargar el inventario: $error'),
+                ),
+                data: (products) {
+                  if (products.isEmpty) {
+                    return const Center(child: Text('No hay productos registrados.'));
+                  }
+                  return ListView.builder(
+                    itemCount: products.length,
+                    itemBuilder: (context, index) {
+                      final product = products[index];
+                      final double price = product.price;
 
-                            return Card(
-                              elevation: 2,
-                              margin: const EdgeInsets.symmetric(vertical: 6),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                leading: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF0F3F4),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Icon(Icons.archive, color: Color(0xFF2C3E50)),
-                                ),
-                                title: Text(
-                                  product.name,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                ),
-                                subtitle: Text(
-                                  'Código: ${product.code}\nStock: ${product.stock}',
-                                  style: const TextStyle(height: 1.3),
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      '\$${price.toStringAsFixed(2)}',
-                                      style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    if (widget.userRole == 'Administrador' || widget.userRole == 'admin') ...[
-                                      IconButton(
-                                        icon: const Icon(Icons.edit, color: Colors.blue),
-                                        onPressed: () => _showEditDialog(product),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete, color: Colors.red),
-                                        onPressed: () => _confirmDelete(product.code),
-                                      ),
-                                    ]
-                                  ],
-                                ),
+                      return Card(
+                        elevation: 2,
+                        margin: const EdgeInsets.symmetric(vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0F3F4),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.archive, color: Color(0xFF2C3E50)),
+                          ),
+                          title: Text(
+                            product.name,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          subtitle: Text(
+                            'Código: ${product.code}\nStock: ${product.stock}',
+                            style: const TextStyle(height: 1.3),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '\$${price.toStringAsFixed(2)}',
+                                style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16),
                               ),
-                            );
-                          },
+                              const SizedBox(width: 12),
+                              if (isAdmin) ...[
+                                IconButton(
+                                  icon: const Icon(Icons.edit, color: Colors.blue),
+                                  onPressed: () => _showEditDialog(product),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  onPressed: () => _confirmDelete(product.code),
+                                ),
+                              ]
+                            ],
+                          ),
                         ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ],
         ),

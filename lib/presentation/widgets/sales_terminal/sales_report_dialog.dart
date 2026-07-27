@@ -1,21 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/sync_status.dart';
-import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/sales_repository.dart';
-import '../../../domain/entities/app_user.dart';
-import '../../../domain/entities/sale.dart';
 import '../../../domain/entities/sale_detail.dart';
+import '../../providers/auth_controller.dart';
+import '../../providers/sales_controller.dart';
+import '../../providers/user_controller.dart';
 
 /// Diálogo para crear una nueva cuenta de empleado (cajero/administrador).
 ///
-/// Extraído de `SalesTerminalScreen._showCreateUserDialog`. Se abre desde
-/// dentro de [showSalesReportDialog], por eso recibe el `setDialogState`
-/// del diálogo padre: así la lista de usuarios se refresca sin tener que
-/// cerrar y reabrir todo el panel.
+/// Llama a userControllerProvider.addUser(), que ya trae su propia
+/// validación de autorización y su propio refresh() de la lista.
 void showCreateUserDialog(
-  BuildContext context, {
+  BuildContext context,
+  WidgetRef ref, {
   required String currentOperatorRole,
-  required Future<void> Function() onCreated,
 }) {
   final userCtrl = TextEditingController();
   final passCtrl = TextEditingController();
@@ -60,15 +59,23 @@ void showCreateUserDialog(
             onPressed: () async {
               if (userCtrl.text.trim().isEmpty || passCtrl.text.isEmpty) return;
               try {
-                await AuthRepository.instance.registerUser(
-                  currentOperatorRole: currentOperatorRole,
-                  newUsername: userCtrl.text.trim(),
-                  newPassword: passCtrl.text,
-                  newRole: selectedRole,
-                );
+                final result = await ref.read(userControllerProvider.notifier).addUser(
+                      currentOperatorRole: currentOperatorRole,
+                      username: userCtrl.text.trim(),
+                      password: passCtrl.text,
+                      role: selectedRole,
+                    );
+
                 if (!dialogContext.mounted) return;
+
+                if (result == UserSaveResult.notAuthorized) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(content: Text('Acceso Denegado: Tu rol actual ($currentOperatorRole) no tiene autorización para dar de alta cuentas.')),
+                  );
+                  return;
+                }
+
                 Navigator.pop(dialogContext);
-                await onCreated();
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -81,7 +88,8 @@ void showCreateUserDialog(
                   ),
                 );
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
                   SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
                 );
               }
@@ -97,107 +105,106 @@ void showCreateUserDialog(
 /// Panel de control de la Terminal de Ventas: corte de caja del día y,
 /// para administradores, gestión de personal (crear/dar de baja cuentas).
 ///
-/// Extraído de `SalesTerminalScreen._showSalesReport`. Es el bloque más
-/// grande que tenía el widget original -- se movió tal cual, incluyendo
-/// su propio `StatefulBuilder` interno para refrescar sales/users sin
-/// cerrar el diálogo.
-void showSalesReportDialog(BuildContext context, {required String userRole}) async {
-  List<Sale> sales = await SalesRepository.instance.getSales();
-  List<AppUser> users = await AuthRepository.instance.getUsers();
-
-  double granTotal = 0.0;
-  for (var sale in sales) {
-    granTotal += sale.total;
-  }
+/// CORREGIDO: tanto el corte de caja como la lista de personal ya no
+/// viven como variables locales del StatefulBuilder -- ambas pestañas
+/// se envuelven en su propio Consumer y leen directo de
+/// salesControllerProvider / userControllerProvider. El botón de
+/// refresh ya no hace su propio fetch+setDialogState: solo llama a
+/// refresh() de los controllers correspondientes.
+void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
+  final userRole = ref.read(currentUserProvider)?.role ?? 'Cajero';
+  final isAdmin = userRole == 'Administrador' || userRole == 'admin';
 
   if (!context.mounted) return;
-  final isAdmin = userRole == 'Administrador' || userRole == 'admin';
 
   showDialog(
     context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (dialogContext, setDialogState) => DefaultTabController(
-        length: isAdmin ? 2 : 1,
-        child: AlertDialog(
-          title: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.analytics, color: Color(0xFF232D37)),
-                  SizedBox(width: 10),
-                  Text('Panel de Control', style: TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-              Row(
-                children: [
-                  // Botón para reintentar la sincronización con Supabase
-                  // sin tener que cerrar y reabrir el panel.
-                  IconButton(
-                    icon: const Icon(Icons.refresh),
-                    tooltip: 'Sincronizar con Supabase',
-                    onPressed: () async {
-                      final freshSales = await SalesRepository.instance.getSales();
-                      final freshUsers = await AuthRepository.instance.getUsers();
-                      double freshTotal = 0.0;
-                      for (var sale in freshSales) {
-                        freshTotal += sale.total;
-                      }
-                      final syncOk = SyncStatus.lastSyncOk;
-                      setDialogState(() {
-                        sales = freshSales;
-                        users = freshUsers;
-                        granTotal = freshTotal;
-                      });
-                      if (!syncOk && dialogContext.mounted) {
-                        ScaffoldMessenger.of(dialogContext).showSnackBar(
-                          const SnackBar(content: Text('⚠️ No se pudo sincronizar con Supabase.'), backgroundColor: Colors.orange),
-                        );
-                      }
-                    },
-                  ),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(dialogContext)),
-                ],
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: 450,
-            height: 400,
-            child: Column(
+    builder: (dialogContext) => DefaultTabController(
+      length: isAdmin ? 2 : 1,
+      child: AlertDialog(
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Row(
               children: [
-                TabBar(
-                  labelColor: const Color(0xFF232D37),
-                  indicatorColor: const Color(0xFF232D37),
-                  tabs: [
-                    const Tab(text: 'Corte de Caja'),
-                    if (isAdmin) const Tab(text: 'Gestión de Personal'),
-                  ],
+                Icon(Icons.analytics, color: Color(0xFF232D37)),
+                SizedBox(width: 10),
+                Text('Panel de Control', style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            Row(
+              children: [
+                // Botón para reintentar la sincronización con Supabase
+                // sin tener que cerrar y reabrir el panel.
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Sincronizar con Supabase',
+                  onPressed: () async {
+                    await ref.read(salesControllerProvider.notifier).refresh();
+                    if (isAdmin) {
+                      await ref.read(userControllerProvider.notifier).refresh();
+                    }
+                    if (!SyncStatus.lastSyncOk && dialogContext.mounted) {
+                      ScaffoldMessenger.of(dialogContext).showSnackBar(
+                        const SnackBar(content: Text('⚠️ No se pudo sincronizar con Supabase.'), backgroundColor: Colors.orange),
+                      );
+                    }
+                  },
                 ),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: TabBarView(
-                    children: [
-                      Column(
-                        children: [
-                          Card(
-                            color: Colors.green[50],
-                            child: Padding(
-                              padding: const EdgeInsets.all(12.0),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text('VENTAS ACUMULADAS:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                  Text('\$${granTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green)),
-                                ],
+                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(dialogContext)),
+              ],
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 450,
+          height: 400,
+          child: Column(
+            children: [
+              TabBar(
+                labelColor: const Color(0xFF232D37),
+                indicatorColor: const Color(0xFF232D37),
+                tabs: [
+                  const Tab(text: 'Corte de Caja'),
+                  if (isAdmin) const Tab(text: 'Gestión de Personal'),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final salesAsync = ref.watch(salesControllerProvider);
+                        final granTotal = ref.watch(salesTotalProvider);
+
+                        return Column(
+                          children: [
+                            Card(
+                              color: Colors.green[50],
+                              child: Padding(
+                                padding: const EdgeInsets.all(12.0),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('VENTAS ACUMULADAS:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                    Text('\$${granTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green)),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 10),
-                          Expanded(
-                            child: sales.isEmpty
-                                ? const Center(child: Text('Sin movimientos hoy.'))
-                                : ListView.builder(
+                            const SizedBox(height: 10),
+                            Expanded(
+                              child: salesAsync.when(
+                                loading: () => const Center(child: CircularProgressIndicator()),
+                                error: (error, stackTrace) => Center(
+                                  child: Text('No se pudo cargar el corte de caja: $error'),
+                                ),
+                                data: (sales) {
+                                  if (sales.isEmpty) {
+                                    return const Center(child: Text('Sin movimientos hoy.'));
+                                  }
+                                  return ListView.builder(
                                     itemCount: sales.length,
                                     itemBuilder: (context, index) {
                                       final sale = sales[index];
@@ -209,6 +216,9 @@ void showSalesReportDialog(BuildContext context, {required String userRole}) asy
                                         trailing: Text('\$${sale.total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                                         // Al desplegar el ticket se muestra el desglose de
                                         // productos vendidos, sincronizado desde Supabase.
+                                        // Esto se queda como FutureBuilder puntual -- no hay
+                                        // necesidad de un controller para un detalle que solo
+                                        // se consulta al expandir un ticket.
                                         children: [
                                           FutureBuilder<List<SaleDetail>>(
                                             future: SalesRepository.instance.getSaleDetails(saleId),
@@ -253,32 +263,43 @@ void showSalesReportDialog(BuildContext context, {required String userRole}) asy
                                         ],
                                       );
                                     },
-                                  ),
-                          ),
-                        ],
-                      ),
-                      if (isAdmin)
-                        Column(
-                          children: [
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton.icon(
-                                icon: const Icon(Icons.person_add, size: 18),
-                                label: const Text('Nueva cuenta'),
-                                onPressed: () => showCreateUserDialog(
-                                  dialogContext,
-                                  currentOperatorRole: userRole,
-                                  onCreated: () async {
-                                    final updatedUsers = await AuthRepository.instance.getUsers();
-                                    setDialogState(() { users = updatedUsers; });
-                                  },
-                                ),
+                                  );
+                                },
                               ),
                             ),
-                            Expanded(
-                              child: users.isEmpty
-                                  ? const Center(child: Text('No hay cuentas creadas.'))
-                                  : ListView.builder(
+                          ],
+                        );
+                      },
+                    ),
+                    if (isAdmin)
+                      Consumer(
+                        builder: (context, ref, _) {
+                          final usersAsync = ref.watch(userControllerProvider);
+                          return Column(
+                            children: [
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  icon: const Icon(Icons.person_add, size: 18),
+                                  label: const Text('Nueva cuenta'),
+                                  onPressed: () => showCreateUserDialog(
+                                    dialogContext,
+                                    ref,
+                                    currentOperatorRole: userRole,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: usersAsync.when(
+                                  loading: () => const Center(child: CircularProgressIndicator()),
+                                  error: (error, stackTrace) => Center(
+                                    child: Text('No se pudo cargar el personal: $error'),
+                                  ),
+                                  data: (users) {
+                                    if (users.isEmpty) {
+                                      return const Center(child: Text('No hay cuentas creadas.'));
+                                    }
+                                    return ListView.builder(
                                       itemCount: users.length,
                                       itemBuilder: (context, index) {
                                         final user = users[index];
@@ -292,22 +313,23 @@ void showSalesReportDialog(BuildContext context, {required String userRole}) asy
                                                   icon: const Icon(Icons.person_remove, color: Colors.redAccent),
                                                   tooltip: 'Dar de baja inmediatamente',
                                                   onPressed: () async {
-                                                    await AuthRepository.instance.deleteUser(user.username);
-                                                    final updatedUsers = await AuthRepository.instance.getUsers();
-                                                    setDialogState(() { users = updatedUsers; });
+                                                    await ref.read(userControllerProvider.notifier).deleteUser(user.username);
                                                   },
                                                 ),
                                         );
                                       },
-                                    ),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

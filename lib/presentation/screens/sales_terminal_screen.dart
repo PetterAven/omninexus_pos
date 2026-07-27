@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/product_repository.dart';
 import '../../data/repositories/sync_repository.dart';
-import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/product.dart';
 import '../providers/auth_controller.dart';
+import '../providers/cart_controller.dart';
 import '../providers/checkout_controller.dart';
 import 'inventory_screen.dart';
 import 'barcode_scanner_screen.dart';
@@ -23,11 +23,12 @@ class SalesTerminalScreen extends ConsumerStatefulWidget {
 }
 
 class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
-  final List<CartItem> _cart = [];
+  // CORREGIDO: el carrito ya no vive aquí -- se movió a
+  // cartControllerProvider (ver providers/cart_controller.dart). Este
+  // State ya solo guarda lo que es puramente de esta pantalla: los
+  // controllers de texto y el cliente de Telegram vinculado.
   final SearchController _searchController = SearchController();
   final TextEditingController _cashController = TextEditingController();
-
-  double _total = 0.0;
 
   // ================= VARIABLES CLIENTE VINCULADO =================
   String? _linkedChatId;
@@ -39,7 +40,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     SyncRepository.instance.listenToRemoteCart((scannedMap) {
       if (!mounted) return;
       final product = Product.fromMap(scannedMap);
-      _addProductToCart(product);
+      _handleAddProduct(product);
     });
   }
 
@@ -59,69 +60,37 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
         SyncRepository.instance.listenToRemoteCart((scannedMap) {
           if (!mounted) return;
           final product = Product.fromMap(scannedMap);
-          _addProductToCart(product);
+          _handleAddProduct(product);
         });
       },
     );
   }
 
-  void _addQuickCash(double amount) {
-    double current = double.tryParse(_cashController.text) ?? 0.0;
-    double nuevo = current + amount;
-    _cashController.text =
-        nuevo % 1 == 0 ? nuevo.toStringAsFixed(0) : nuevo.toStringAsFixed(2);
-    // El error de "monto inferior al total" ahora vive en el AsyncError
-    // del checkoutControllerProvider; al teclear un nuevo monto lo
-    // reseteamos para que no se quede pegado un error viejo en pantalla.
-    ref.read(checkoutControllerProvider.notifier).reset();
-  }
-
-  void _calculateTotal() {
-    double total = 0.0;
-    for (var item in _cart) {
-      total += item.subtotal;
+  // CORREGIDO: reemplaza a la antigua _addProductToCart. La lógica de
+  // stock/duplicados ahora vive en CartController.addProduct(); aquí
+  // solo interpretamos el resultado para decidir qué SnackBar mostrar
+  // (el controller no conoce BuildContext, y no debe conocerlo).
+  void _handleAddProduct(Product product) {
+    final result = ref.read(cartControllerProvider.notifier).addProduct(product);
+    switch (result) {
+      case CartOperationResult.outOfStock:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Este producto no tiene stock disponible.')),
+        );
+        break;
+      case CartOperationResult.noMoreStock:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay más stock disponible.')),
+        );
+        break;
+      case CartOperationResult.success:
+        _searchController.clear();
+        break;
     }
-    setState(() {
-      _total = total;
-    });
-  }
-
-  void _addProductToCart(Product product) {
-    if (product.stock <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Este producto no tiene stock disponible.'),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      final existingIndex =
-          _cart.indexWhere((item) => item.product.code == product.code);
-
-      if (existingIndex >= 0) {
-        final currentItem = _cart[existingIndex];
-        if (currentItem.quantity < product.stock) {
-          _cart[existingIndex] = currentItem.copyWith(
-            quantity: currentItem.quantity + 1,
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No hay más stock disponible.')),
-          );
-          return;
-        }
-      } else {
-        _cart.add(CartItem(product: product, quantity: 1));
-      }
-      _searchController.clear();
-      _calculateTotal();
-    });
   }
 
   void _clearCart() {
-    if (_cart.isEmpty) return;
+    if (ref.read(cartControllerProvider).isEmpty) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -134,9 +103,8 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
           ),
           TextButton(
             onPressed: () {
+              ref.read(cartControllerProvider.notifier).clear();
               setState(() {
-                _cart.clear();
-                _total = 0.0;
                 _cashController.clear();
                 _linkedChatId = null;
                 _linkedUsername = null;
@@ -177,19 +145,13 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     }
   }
 
-  // Helper para convertir el carrito a la estructura exigida por los servicios de Ticket/Telegram
-  List<Map<String, dynamic>> _getCartAsMaps() {
-    return _cart.map((item) => item.toMap()).toList();
-  }
-
   // ================= REACCIÓN AL RESULTADO DEL COBRO =================
   // Se llama desde el ref.listen del build() cuando el checkoutControllerProvider
   // pasa de loading a data(null) con éxito: pinta el ticket, limpia el
   // carrito y muestra el aviso de Telegram si lo hubo.
   void _onCheckoutSuccess(CheckoutResult result) {
+    ref.read(cartControllerProvider.notifier).clear();
     setState(() {
-      _cart.clear();
-      _total = 0.0;
       _cashController.clear();
       _linkedChatId = null;
       _linkedUsername = null;
@@ -228,7 +190,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     if (!mounted) return;
     if (results.isNotEmpty) {
       final product = results.first;
-      _addProductToCart(product);
+      _handleAddProduct(product);
       SyncRepository.instance.sendProductToRemoteCart(product.toMap());
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -240,97 +202,34 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
   }
 
   // ================= SECCIÓN: BUSCADOR + CARRITO =================
+  // CORREGIDO: CartAndSearchSection ahora es ConsumerWidget y lee/muta
+  // cartControllerProvider directo -- ya no necesita que le pasemos el
+  // carrito ni los callbacks de agregar/incrementar/decrementar. Solo
+  // le seguimos pasando lo que de verdad no puede resolver por sí solo:
+  // el layout (expandCart), el controller de búsqueda, y la navegación
+  // al escáner (que además sincroniza con el otro dispositivo).
   Widget _buildSearchAndCart(BuildContext context, {required bool expandCart}) {
-    final List<Map<String, dynamic>> cartAsMaps = _getCartAsMaps();
-
     return CartAndSearchSection(
       expandCart: expandCart,
       searchController: _searchController,
-      cart: cartAsMaps,
-      onAddProductToCart: (productMap) {
-        _addProductToCart(Product.fromMap(productMap));
-      },
       onScanBarcode: _scanBarcode,
-      onIncreaseQuantity: (index) {
-        setState(() {
-          final item = _cart[index];
-          if (item.quantity < item.product.stock) {
-            _cart[index] = item.copyWith(quantity: item.quantity + 1);
-            _calculateTotal();
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No hay más stock disponible.')),
-            );
-          }
-        });
-      },
-      onDecreaseQuantity: (index) {
-        setState(() {
-          final item = _cart[index];
-          if (item.quantity > 1) {
-            _cart[index] = item.copyWith(quantity: item.quantity - 1);
-          } else {
-            _cart.removeAt(index);
-          }
-          _calculateTotal();
-        });
-      },
     );
   }
 
   // ================= SECCIÓN: PANEL DE COBRO =================
+  // CORREGIDO: PaymentPanel ahora es ConsumerWidget y resuelve total,
+  // loading/error del cobro, "carrito vacío" y los tres flujos de pago
+  // (efectivo por Enter, botón efectivo, tarjeta) directo contra los
+  // providers. Aquí solo le seguimos pasando lo que sigue siendo estado
+  // local de esta pantalla: el cashController compartido con
+  // _clearCart/_onCheckoutSuccess, el cliente vinculado a Telegram, y
+  // onClearCart (abre el diálogo de confirmación).
   Widget _buildPaymentPanel(BuildContext context, {required bool isWide}) {
-    final checkoutState = ref.watch(checkoutControllerProvider);
-    final isProcessingPayment = checkoutState.isLoading;
-    final paymentErrorText = checkoutState.hasError ? checkoutState.error.toString() : null;
-
     return PaymentPanel(
       isWide: isWide,
-      isProcessingPayment: isProcessingPayment,
-      total: _total,
       cashController: _cashController,
-      paymentErrorText: paymentErrorText,
-      cartIsEmpty: _cart.isEmpty,
-      onAddQuickCash: _addQuickCash,
-      onSetExactAmount: () {
-        setState(() {
-          _cashController.text = _total % 1 == 0
-              ? _total.toStringAsFixed(0)
-              : _total.toStringAsFixed(2);
-        });
-        ref.read(checkoutControllerProvider.notifier).reset();
-      },
-      onClearCash: () {
-        _cashController.clear();
-        ref.read(checkoutControllerProvider.notifier).reset();
-      },
-      onSubmitCash: (cashReceived) {
-        ref.read(checkoutControllerProvider.notifier).payCash(
-              total: _total,
-              cashReceived: cashReceived,
-              cartItems: _cart,
-              linkedChatId: _linkedChatId,
-              linkedUsername: _linkedUsername,
-            );
-      },
-      onPayCash: () {
-        double cash = double.tryParse(_cashController.text) ?? 0.0;
-        ref.read(checkoutControllerProvider.notifier).payCash(
-              total: _total,
-              cashReceived: cash,
-              cartItems: _cart,
-              linkedChatId: _linkedChatId,
-              linkedUsername: _linkedUsername,
-            );
-      },
-      onPayCard: () {
-        ref.read(checkoutControllerProvider.notifier).payCard(
-              total: _total,
-              cartItems: _cart,
-              linkedChatId: _linkedChatId,
-              linkedUsername: _linkedUsername,
-            );
-      },
+      linkedChatId: _linkedChatId,
+      linkedUsername: _linkedUsername,
       onClearCart: _clearCart,
     );
   }
@@ -422,10 +321,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                     IconButton(
                       icon: const Icon(Icons.analytics_outlined),
                       tooltip: 'Corte y Personal',
-                      onPressed: () => showSalesReportDialog(
-                        context,
-                        userRole: userRole ?? 'Cajero',
-                      ),
+                      onPressed: () => showSalesReportDialog(context, ref),
                     ),
                     IconButton(
                       icon: const Icon(Icons.inventory_2_outlined),
@@ -434,9 +330,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => InventoryScreen(
-                              userRole: userRole ?? 'Cajero',
-                            ),
+                            builder: (_) => const InventoryScreen(),
                           ),
                         );
                       },
@@ -454,18 +348,13 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                       _abrirVinculacionTelegram();
                       break;
                     case 'corte':
-                      showSalesReportDialog(
-                        context,
-                        userRole: userRole ?? 'Cajero',
-                      );
+                      showSalesReportDialog(context, ref);
                       break;
                     case 'inventario':
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => InventoryScreen(
-                            userRole: userRole ?? 'Cajero',
-                          ),
+                          builder: (_) => const InventoryScreen(),
                         ),
                       );
                       break;

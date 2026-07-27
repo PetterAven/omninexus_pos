@@ -1,38 +1,63 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/repositories/product_repository.dart';
+import '../../../domain/entities/product.dart';
+import '../../providers/cart_controller.dart';
 
 /// Sección de "buscador de productos + carrito" de la Terminal de
 /// Ventas. Se usa tanto en el layout ancho (PC/tablet) como en el
 /// angosto (teléfono) -- por eso el parámetro [expandCart].
 ///
-/// Extraído de `SalesTerminalScreen._buildSearchAndCart`. La búsqueda de
-/// productos (`ProductRepository.searchProducts`) se queda aquí dentro
-/// porque es una simple lectura que no afecta el estado del carrito; en
-/// cambio, cualquier cosa que modifique el carrito (agregar, subir/bajar
-/// cantidad) sale por callback, porque ese estado vive en el padre
-/// (`_SalesTerminalScreenState`), no en este widget.
-class CartAndSearchSection extends StatelessWidget {
+/// CORREGIDO: convertido a ConsumerWidget. Antes recibía `cart` (ya
+/// convertido a `List<Map>` por el padre) y tres callbacks
+/// (`onAddProductToCart`, `onIncreaseQuantity`, `onDecreaseQuantity`)
+/// para que SalesTerminalScreen mutara su `_cart` local. Como el
+/// carrito ahora vive en cartControllerProvider, este widget lee/muta
+/// el estado directo -- ya no hay nada que "subir" al padre para eso.
+/// Solo sobrevive `onScanBarcode` como callback porque no es una simple
+/// mutación de carrito: navega a otra pantalla y además sincroniza el
+/// código escaneado con el otro dispositivo vía SyncRepository, algo
+/// que sigue siendo responsabilidad de SalesTerminalScreen.
+class CartAndSearchSection extends ConsumerWidget {
   final bool expandCart;
   final SearchController searchController;
-  final List<Map<String, dynamic>> cart;
-  final void Function(Map<String, dynamic> product) onAddProductToCart;
   final VoidCallback onScanBarcode;
-  final void Function(int index) onIncreaseQuantity;
-  final void Function(int index) onDecreaseQuantity;
 
   const CartAndSearchSection({
     super.key,
     required this.expandCart,
     required this.searchController,
-    required this.cart,
-    required this.onAddProductToCart,
     required this.onScanBarcode,
-    required this.onIncreaseQuantity,
-    required this.onDecreaseQuantity,
   });
 
+  void _handleAddProduct(BuildContext context, WidgetRef ref, Product product) {
+    final result = ref.read(cartControllerProvider.notifier).addProduct(product);
+    if (result == CartOperationResult.success) {
+      searchController.clear();
+      return;
+    }
+    _showStockSnackBar(context, result);
+  }
+
+  void _handleIncreaseQuantity(BuildContext context, WidgetRef ref, int index) {
+    final result = ref.read(cartControllerProvider.notifier).increaseQuantity(index);
+    _showStockSnackBar(context, result);
+  }
+
+  void _showStockSnackBar(BuildContext context, CartOperationResult result) {
+    final message = switch (result) {
+      CartOperationResult.outOfStock => 'Este producto no tiene stock disponible.',
+      CartOperationResult.noMoreStock => 'No hay más stock disponible.',
+      CartOperationResult.success => null,
+    };
+    if (message == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cart = ref.watch(cartControllerProvider);
+
     final searchRow = Row(
       children: [
         Expanded(
@@ -52,7 +77,7 @@ class CartAndSearchSection extends StatelessWidget {
                 title: Text(product.name),
                 subtitle: Text('Código: ${product.code} | Stock: ${product.stock}'),
                 trailing: Text('\$${product.price.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                onTap: () => onAddProductToCart(product.toMap()),
+                onTap: () => _handleAddProduct(context, ref, product),
               )).toList();
             },
           ),
@@ -89,21 +114,21 @@ class CartAndSearchSection extends StatelessWidget {
                 return ListTile(
                   leading: CircleAvatar(
                     backgroundColor: const Color(0xFF232D37),
-                    child: Text('${item['quantity']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    child: Text('${item.quantity}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
-                  title: Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('Código: ${item['code']} | unit: \$${item['price']}'),
+                  title: Text(item.product.name.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('Código: ${item.product.code} | unit: \$${item.product.price}'),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('\$${((item['price'] ?? 0.0) * item['quantity']).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      Text('\$${item.subtotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       IconButton(
                         icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
-                        onPressed: () => onDecreaseQuantity(index),
+                        onPressed: () => ref.read(cartControllerProvider.notifier).decreaseQuantity(index),
                       ),
                       IconButton(
                         icon: const Icon(Icons.add_circle_outline, color: Colors.green),
-                        onPressed: () => onIncreaseQuantity(index),
+                        onPressed: () => _handleIncreaseQuantity(context, ref, index),
                       ),
                     ],
                   ),

@@ -1,46 +1,48 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/cart_controller.dart';
+import '../../providers/checkout_controller.dart';
 
 /// Panel de cobro (efectivo / tarjeta) de la Terminal de Ventas.
 ///
-/// Extraído de `SalesTerminalScreen._buildPaymentPanel`: es UI pura, no
-/// toca el carrito ni los repositorios directamente -- todo lo que
-/// necesita entra por parámetros y todo lo que decide salir lo hace vía
-/// callbacks. Esto permite probarlo o modificarlo sin arrastrar el resto
-/// de la pantalla de ventas.
-class PaymentPanel extends StatelessWidget {
+/// CORREGIDO: convertido a ConsumerWidget. Antes recibía 13 parámetros
+/// -- `total`, `isProcessingPayment`, `paymentErrorText`, `cartIsEmpty`
+/// y seis callbacks -- todos calculados/armados a mano en
+/// `SalesTerminalScreen._buildPaymentPanel`. De esos, todo lo que era
+/// pura lectura de un provider (total, loading, error, carrito vacío) o
+/// una acción que solo necesitaba `ref` (agregar efectivo rápido, monto
+/// exacto, limpiar campo, pagar en efectivo/tarjeta) se resolvió aquí
+/// dentro. Solo sobreviven como parámetros: el layout (`isWide`), el
+/// controller de texto (`cashController`, porque otros puntos de
+/// `SalesTerminalScreen` como `_clearCart`/`_onCheckoutSuccess` también
+/// necesitan limpiarlo), el cliente vinculado a Telegram (todavía vive
+/// como estado local del State, no hay provider para eso aún) y
+/// `onClearCart` (abre un diálogo de confirmación y resetea ese mismo
+/// estado de Telegram -- no es algo que este widget deba decidir).
+class PaymentPanel extends ConsumerWidget {
   final bool isWide;
-  final bool isProcessingPayment;
-  final double total;
   final TextEditingController cashController;
-  final String? paymentErrorText;
-  final void Function(double amount) onAddQuickCash;
-  final VoidCallback onSetExactAmount;
-  final VoidCallback onClearCash;
-  final void Function(double cashReceived) onSubmitCash;
-  final VoidCallback onPayCash;
-  final VoidCallback onPayCard;
+  final String? linkedChatId;
+  final String? linkedUsername;
   final VoidCallback onClearCart;
-  final bool cartIsEmpty;
 
   const PaymentPanel({
     super.key,
     required this.isWide,
-    required this.isProcessingPayment,
-    required this.total,
     required this.cashController,
-    required this.paymentErrorText,
-    required this.onAddQuickCash,
-    required this.onSetExactAmount,
-    required this.onClearCash,
-    required this.onSubmitCash,
-    required this.onPayCash,
-    required this.onPayCard,
+    this.linkedChatId,
+    this.linkedUsername,
     required this.onClearCart,
-    required this.cartIsEmpty,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final checkoutState = ref.watch(checkoutControllerProvider);
+    final isProcessingPayment = checkoutState.isLoading;
+    final paymentErrorText = checkoutState.hasError ? checkoutState.error.toString() : null;
+    final total = ref.watch(cartTotalProvider);
+    final cartIsEmpty = ref.watch(cartControllerProvider).isEmpty;
+
     return Container(
       margin: isWide
           ? const EdgeInsets.only(top: 16, bottom: 16, right: 16)
@@ -51,7 +53,9 @@ class PaymentPanel extends StatelessWidget {
         boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
       ),
       padding: const EdgeInsets.all(20.0),
-      child: isProcessingPayment ? _buildProcessing() : _buildForm(context),
+      child: isProcessingPayment
+          ? _buildProcessing()
+          : _buildForm(context, ref, total: total, paymentErrorText: paymentErrorText, cartIsEmpty: cartIsEmpty),
     );
   }
 
@@ -68,7 +72,23 @@ class PaymentPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildForm(BuildContext context) {
+  void _payCash(WidgetRef ref, {required double total, required double cashReceived}) {
+    ref.read(checkoutControllerProvider.notifier).payCash(
+          total: total,
+          cashReceived: cashReceived,
+          cartItems: ref.read(cartControllerProvider),
+          linkedChatId: linkedChatId,
+          linkedUsername: linkedUsername,
+        );
+  }
+
+  Widget _buildForm(
+    BuildContext context,
+    WidgetRef ref, {
+    required double total,
+    required String? paymentErrorText,
+    required bool cartIsEmpty,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -102,7 +122,7 @@ class PaymentPanel extends StatelessWidget {
           onSubmitted: (_) {
             if (total > 0) {
               double cash = double.tryParse(cashController.text) ?? 0.0;
-              onSubmitCash(cash);
+              _payCash(ref, total: total, cashReceived: cash);
             }
           },
         ),
@@ -118,7 +138,13 @@ class PaymentPanel extends StatelessWidget {
                   side: BorderSide(color: Colors.green.shade300),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
-                onPressed: () => onAddQuickCash(billete),
+                onPressed: () {
+                  double current = double.tryParse(cashController.text) ?? 0.0;
+                  double nuevo = current + billete;
+                  cashController.text =
+                      nuevo % 1 == 0 ? nuevo.toStringAsFixed(0) : nuevo.toStringAsFixed(2);
+                  ref.read(checkoutControllerProvider.notifier).reset();
+                },
                 child: Text('+\$${billete.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
             OutlinedButton(
@@ -127,7 +153,10 @@ class PaymentPanel extends StatelessWidget {
                 side: BorderSide(color: Colors.blueGrey.shade200),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
-              onPressed: onSetExactAmount,
+              onPressed: () {
+                cashController.text = total % 1 == 0 ? total.toStringAsFixed(0) : total.toStringAsFixed(2);
+                ref.read(checkoutControllerProvider.notifier).reset();
+              },
               child: const Text('Exacto', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
             OutlinedButton(
@@ -136,7 +165,10 @@ class PaymentPanel extends StatelessWidget {
                 side: BorderSide(color: Colors.red.shade200),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
-              onPressed: onClearCash,
+              onPressed: () {
+                cashController.clear();
+                ref.read(checkoutControllerProvider.notifier).reset();
+              },
               child: const Icon(Icons.backspace_outlined, size: 18),
             ),
           ],
@@ -150,7 +182,12 @@ class PaymentPanel extends StatelessWidget {
           ),
           icon: const Icon(Icons.payments_outlined),
           label: const Text('Registrar Pago Efectivo', style: TextStyle(fontWeight: FontWeight.bold)),
-          onPressed: total > 0 ? onPayCash : null,
+          onPressed: total > 0
+              ? () {
+                  double cash = double.tryParse(cashController.text) ?? 0.0;
+                  _payCash(ref, total: total, cashReceived: cash);
+                }
+              : null,
         ),
         const SizedBox(height: 20),
         const Row(
@@ -172,7 +209,16 @@ class PaymentPanel extends StatelessWidget {
           ),
           icon: const Icon(Icons.credit_card_outlined),
           label: const Text('Cobrar con Tarjeta (Débito/Crédito)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-          onPressed: total > 0 ? onPayCard : null,
+          onPressed: total > 0
+              ? () {
+                  ref.read(checkoutControllerProvider.notifier).payCard(
+                        total: total,
+                        cartItems: ref.read(cartControllerProvider),
+                        linkedChatId: linkedChatId,
+                        linkedUsername: linkedUsername,
+                      );
+                }
+              : null,
         ),
         SizedBox(height: isWide ? 20 : 20),
         if (isWide) const Spacer(),
