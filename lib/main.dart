@@ -1,12 +1,24 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart'; // 👈 AGREGADO
 import 'core/sync_status.dart';
 import 'presentation/screens/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // AGREGADO: inicializamos sqflite_ffi ANTES de cualquier acceso a la BD.
+  // Debe ejecutarse antes de que AppDatabase.instance.database sea usado
+  // por primera vez (login, carga de productos, etc.). Sin esto, en
+  // Windows/Linux la app intenta usar el factory nativo de sqflite (que
+  // solo existe en Android/iOS) y falla al abrir la base de datos.
+  if (Platform.isWindows || Platform.isLinux) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
 
   // CORREGIDO: las credenciales ya NO están escritas en el código. Se leen
   // del archivo .env (que está en .gitignore y nunca se sube a GitHub).
