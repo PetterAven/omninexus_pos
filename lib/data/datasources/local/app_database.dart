@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart'; // 👈 IMPORTANTE
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:bcrypt/bcrypt.dart';
 
@@ -25,13 +26,28 @@ class AppDatabase {
   }
 
   Future<Database> _initDB(String filePath) async {
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
+    String path;
+
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
-    }
 
-    final dbPath = await databaseFactory.getDatabasesPath();
-    final path = join(dbPath, filePath);
+      // 1. Obtenemos la carpeta "Documentos" del usuario actual
+      final docsDir = await getApplicationDocumentsDirectory();
+
+      // 2. Creamos una carpeta propia para el punto de venta
+      final appFolder = Directory(join(docsDir.path, 'OmniNexusPOS'));
+      if (!await appFolder.exists()) {
+        await appFolder.create(recursive: true);
+      }
+
+      // 3. La ruta final será: C:\Users\Nombre\Documents\OmniNexusPOS\omninexus.db
+      path = join(appFolder.path, filePath);
+    } else {
+      // Para Android / iOS sigue usando la ruta nativa estándar
+      final dbPath = await databaseFactory.getDatabasesPath();
+      path = join(dbPath, filePath);
+    }
 
     return await databaseFactory.openDatabase(
       path,
