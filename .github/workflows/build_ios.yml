@@ -1,0 +1,33 @@
+name: Build iOS Release
+
+on:
+  workflow_dispatch: # Permite activar la compilación manualmente desde GitHub
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Crea el archivo .env para evitar que falle el empaquetado de assets
+      - name: Create dummy .env file
+        run: touch .env
+
+      - name: Build iOS App (Unsigned)
+        run: flutter build ios --release --no-codesign
+
+      - name: Upload iOS Runner App
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmniNexus_POS_iOS
+          path: build/ios/iphoneos/Runner.app
