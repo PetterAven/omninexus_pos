@@ -11,26 +11,35 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {
-    // Inicializar SQLite FFI para soporte de pruebas en Windows/Linux
+    // Inicialización global de SQLite FFI
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
 
-    // Evita el MissingPluginException de shared_preferences dentro del
-    // entorno de pruebas (supabase_flutter lo usa internamente para
-    // guardar la sesión local).
     SharedPreferences.setMockInitialValues({});
 
-    // Los repositorios crean el cliente de Supabase (Supabase.instance.client)
-    // así que hay que inicializarlo antes de usarlos. Usamos un proyecto que
-    // NO existe a propósito: como la llamada de red va a fallar/hacer
-    // timeout, el propio código de los repositorios cae a su modo local
-    // (offline) automáticamente -- así probamos la lógica de SQLite de
-    // forma aislada, sin depender de tener internet ni credenciales reales.
     await Supabase.initialize(
       url: 'https://fake-project-para-pruebas.supabase.co',
       publishableKey:
           'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
     );
+  });
+
+  setUp(() async {
+    // Abrir una instancia completamente limpia en memoria RAM
+    final db = await databaseFactory.openDatabase(
+      inMemoryDatabasePath,
+      options: OpenDatabaseOptions(
+        version: 3,
+        onCreate: AppDatabase.createTables,
+      ),
+    );
+    // Inyectar en el Singleton de la aplicación
+    AppDatabase.instance.setDatabaseForTesting(db);
+  });
+
+  tearDown(() async {
+    // Cerrar la base de datos y liberar la memoria al terminar cada test
+    await AppDatabase.instance.close();
   });
 
   group('Pruebas Dinámicas - ProductRepository', () {
@@ -103,8 +112,6 @@ void main() {
   group('Pruebas Dinámicas - AuthRepository (bcrypt)', () {
     late AuthRepository authRepo;
 
-    // Usernames únicos para no chocar con corridas anteriores de la
-    // suite (la BD SQLite persiste entre ejecuciones).
     const testUser = 'test_empleado_bcrypt';
     const testPassword = 'clave123';
     const legacyUser = 'test_legacy_plano';
@@ -112,13 +119,6 @@ void main() {
 
     setUp(() {
       authRepo = AuthRepository.instance;
-    });
-
-    tearDown(() async {
-      // Limpieza: borramos los usuarios de prueba para que la suite se
-      // pueda correr varias veces sin toparse con "usuario ya existe".
-      await authRepo.deleteUser(testUser);
-      await authRepo.deleteUser(legacyUser);
     });
 
     test('5. registerUser guarda la contraseña hasheada, nunca en texto plano', () async {
@@ -135,9 +135,7 @@ void main() {
       expect(rows.isNotEmpty, true);
       final storedPassword = rows.first['password'].toString();
 
-      // La contraseña guardada NO debe ser igual a la que capturó el usuario...
       expect(storedPassword, isNot(equals(testPassword)));
-      // ...y sí debe tener pinta de hash bcrypt ($2a$/$2b$/$2y$ + rounds + salt+hash).
       expect(RegExp(r'^\$2[aby]\$\d{2}\$.{53}$').hasMatch(storedPassword), true);
     });
 
@@ -158,9 +156,6 @@ void main() {
     });
 
     test('7. Migración automática: contraseña en texto plano se hashea sola al hacer login', () async {
-      // Simulamos una cuenta "vieja" creada ANTES del cambio a bcrypt,
-      // insertando directo a la tabla con la contraseña en texto plano
-      // (así se guardaban antes).
       final db = await AppDatabase.instance.database;
       await db.insert('users', {
         'username': legacyUser,
@@ -168,12 +163,9 @@ void main() {
         'role': 'Cajero',
       });
 
-      // El login debe funcionar igual (compatibilidad con cuentas viejas)...
       final login = await authRepo.loginUser(legacyUser, legacyPassword);
       expect(login, isNotNull);
 
-      // ...pero justo después del login, la contraseña guardada ya debe
-      // estar hasheada, no en texto plano.
       final rows = await db.query('users', where: 'username = ?', whereArgs: [legacyUser]);
       final storedPassword = rows.first['password'].toString();
 

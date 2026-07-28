@@ -5,9 +5,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:bcrypt/bcrypt.dart';
 
 /// Datasource LOCAL: solo se encarga de abrir, crear y migrar la base de
-/// datos SQLite. Antes esta lógica vivía mezclada dentro de
-/// DatabaseHelper junto con las llamadas a Supabase y las reglas de
-/// negocio de cada pantalla; ahora solo sabe de SQLite, nada más.
+/// datos SQLite.
 class AppDatabase {
   static final AppDatabase instance = AppDatabase._init();
   static Database? _database;
@@ -18,6 +16,12 @@ class AppDatabase {
     if (_database != null) return _database!;
     _database = await _initDB('omninexus.db');
     return _database!;
+  }
+
+  /// Permite inyectar una instancia personalizada (ej. BD en RAM para pruebas).
+  @visibleForTesting
+  void setDatabaseForTesting(Database db) {
+    _database = db;
   }
 
   Future<Database> _initDB(String filePath) async {
@@ -33,7 +37,7 @@ class AppDatabase {
       path,
       options: OpenDatabaseOptions(
         version: 3,
-        onCreate: _createDB,
+        onCreate: createTables,
         onUpgrade: _onUpgrade,
       ),
     );
@@ -57,7 +61,6 @@ class AppDatabase {
       } catch (_) {}
     }
     if (oldVersion < 3) {
-      // Tabla de configuración local (código de sincronización, etc.)
       await db.execute('''
         CREATE TABLE IF NOT EXISTS app_settings (
           key TEXT PRIMARY KEY,
@@ -67,9 +70,10 @@ class AppDatabase {
     }
   }
 
-  Future<void> _createDB(Database db, int version) async {
+  /// Esquema de tablas estático expuesto para poder reutilizarse en los tests
+  static Future<void> createTables(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE products (
+      CREATE TABLE IF NOT EXISTS products (
         code TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         price REAL NOT NULL,
@@ -78,7 +82,7 @@ class AppDatabase {
     ''');
 
     await db.execute('''
-      CREATE TABLE sales (
+      CREATE TABLE IF NOT EXISTS sales (
         id INTEGER PRIMARY KEY,
         total REAL NOT NULL,
         date TEXT NOT NULL
@@ -86,7 +90,7 @@ class AppDatabase {
     ''');
 
     await db.execute('''
-      CREATE TABLE sale_details (
+      CREATE TABLE IF NOT EXISTS sale_details (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sale_id INTEGER NOT NULL,
         product_code TEXT NOT NULL,
@@ -98,7 +102,7 @@ class AppDatabase {
     ''');
 
     await db.execute('''
-      CREATE TABLE users (
+      CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password TEXT NOT NULL,
         role TEXT NOT NULL
@@ -106,22 +110,26 @@ class AppDatabase {
     ''');
 
     await db.execute('''
-      CREATE TABLE app_settings (
+      CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       )
     ''');
 
-    // Semilla inicial obligatoria (contraseña ya hasheada con bcrypt).
-    await db.insert('users', {
-      'username': 'admin',
-      'password': BCrypt.hashpw('admin123', BCrypt.gensalt()),
-      'role': 'Administrador',
-    });
+    // Semilla inicial obligatoria
+    try {
+      await db.insert('users', {
+        'username': 'admin',
+        'password': BCrypt.hashpw('admin123', BCrypt.gensalt()),
+        'role': 'Administrador',
+      });
+    } catch (_) {}
   }
 
   Future<void> close() async {
-    final db = await instance.database;
-    db.close();
+    if (_database != null) {
+      await _database!.close();
+      _database = null;
+    }
   }
 }
