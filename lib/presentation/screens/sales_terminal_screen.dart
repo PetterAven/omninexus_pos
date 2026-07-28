@@ -8,6 +8,7 @@ import '../providers/cart_controller.dart';
 import '../providers/checkout_controller.dart';
 import 'inventory_screen.dart';
 import 'barcode_scanner_screen.dart';
+import 'login_screen.dart';
 import '../widgets/sales_terminal/payment_panel.dart';
 import '../widgets/sales_terminal/sync_code_dialog.dart';
 import '../widgets/sales_terminal/cart_and_search_section.dart';
@@ -145,6 +146,51 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     }
   }
 
+  // ================= CIERRE DE SESIÓN =================
+  // NUEVO (Sprint 4, Paso 1): antes no existía ningún flujo para llamar
+  // a AuthController.logout() -- el método existía pero nada de la UI
+  // lo invocaba. Además de cerrar la sesión, hay que invalidar
+  // cartControllerProvider y checkoutControllerProvider explícitamente:
+  // como viven en el ProviderScope raíz de main.dart (no por ruta), si
+  // no se invalidan aquí, el siguiente cajero que inicie sesión
+  // heredaría el carrito y el último ticket cobrado del anterior.
+  // El estado local de este State (_linkedChatId, _cashController, etc.)
+  // no necesita limpiarse a mano: pushAndRemoveUntil saca por completo
+  // a SalesTerminalScreen del árbol, así que ese State se destruye solo.
+  void _confirmLogout() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('¿Cerrar sesión?'),
+        content: const Text('Se cerrará tu sesión y se descartará el carrito actual si tiene productos.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _logout();
+            },
+            child: const Text('Cerrar sesión', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _logout() {
+    ref.invalidate(cartControllerProvider);
+    ref.invalidate(checkoutControllerProvider);
+    ref.read(authControllerProvider.notifier).logout();
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
   // ================= REACCIÓN AL RESULTADO DEL COBRO =================
   // Se llama desde el ref.listen del build() cuando el checkoutControllerProvider
   // pasa de loading a data(null) con éxito: pinta el ticket, limpia el
@@ -202,12 +248,6 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
   }
 
   // ================= SECCIÓN: BUSCADOR + CARRITO =================
-  // CORREGIDO: CartAndSearchSection ahora es ConsumerWidget y lee/muta
-  // cartControllerProvider directo -- ya no necesita que le pasemos el
-  // carrito ni los callbacks de agregar/incrementar/decrementar. Solo
-  // le seguimos pasando lo que de verdad no puede resolver por sí solo:
-  // el layout (expandCart), el controller de búsqueda, y la navegación
-  // al escáner (que además sincroniza con el otro dispositivo).
   Widget _buildSearchAndCart(BuildContext context, {required bool expandCart}) {
     return CartAndSearchSection(
       expandCart: expandCart,
@@ -217,13 +257,6 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
   }
 
   // ================= SECCIÓN: PANEL DE COBRO =================
-  // CORREGIDO: PaymentPanel ahora es ConsumerWidget y resuelve total,
-  // loading/error del cobro, "carrito vacío" y los tres flujos de pago
-  // (efectivo por Enter, botón efectivo, tarjeta) directo contra los
-  // providers. Aquí solo le seguimos pasando lo que sigue siendo estado
-  // local de esta pantalla: el cashController compartido con
-  // _clearCart/_onCheckoutSuccess, el cliente vinculado a Telegram, y
-  // onClearCart (abre el diálogo de confirmación).
   Widget _buildPaymentPanel(BuildContext context, {required bool isWide}) {
     return PaymentPanel(
       isWide: isWide,
@@ -236,18 +269,8 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // CORREGIDO: el rol ya no llega por constructor (widget.userRole);
-    // se lee directo del provider derivado de la sesión activa. Como es
-    // una variable local de build(), los closures de abajo (onPressed,
-    // onSelected, etc.) la capturan sin problema y se actualiza sola
-    // si el usuario logueado cambia.
     final userRole = ref.watch(currentUserProvider)?.role;
 
-    // Escucha el checkoutControllerProvider para reaccionar UNA sola vez
-    // cuando el cobro termina bien (loading -> data(null) con lastResult
-    // lleno): pinta el ticket y limpia el carrito. Los estados de
-    // loading/error ya se leen directo con ref.watch dentro de
-    // _buildPaymentPanel para pintar el botón/el texto de error.
     ref.listen(checkoutControllerProvider, (previous, next) {
       final wasLoading = previous?.isLoading ?? false;
       if (wasLoading && next.hasValue && !next.hasError) {
@@ -330,7 +353,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const InventoryScreen(),
+                            builder: (_) => InventoryScreen(userRole: userRole ?? 'Cajero'),
                           ),
                         );
                       },
@@ -354,7 +377,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const InventoryScreen(),
+                          builder: (_) => InventoryScreen(userRole: userRole ?? 'Cajero'),
                         ),
                       );
                       break;
@@ -405,6 +428,16 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
               );
             },
           ),
+          // NUEVO (Sprint 4, Paso 1): botón de cierre de sesión, siempre
+          // visible (fuera del Builder isNarrow/PopupMenu) porque cerrar
+          // sesión es una acción crítica que no debería quedar escondida
+          // detrás de un menú de tres puntos en pantallas angostas.
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Cerrar sesión',
+            onPressed: _confirmLogout,
+          ),
+          const SizedBox(width: 6),
         ],
       ),
       body: LayoutBuilder(

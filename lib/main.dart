@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart'; // <--- AGREGADO
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'core/sync_status.dart';
 import 'presentation/screens/login_screen.dart';
 
 void main() async {
@@ -37,10 +38,19 @@ void main() async {
     }
   }
 
-  // CORREGIDO: envuelto en ProviderScope para habilitar Riverpod en toda la app
+  // NUEVO (Sprint 4, Paso 2): antes se usaba `const ProviderScope(...)`,
+  // que crea su ProviderContainer por dentro sin que nadie fuera de la UI
+  // pueda tocarlo. Aquí lo creamos a mano para poder pasárselo a
+  // SyncStatus.attach() -- así ProductRepository/SalesRepository/
+  // AuthRepository (que no son widgets y no tienen `ref`) pueden seguir
+  // escribiendo en syncStatusProvider con la misma sintaxis de siempre.
+  final container = ProviderContainer();
+  SyncStatus.attach(container);
+
   runApp(
-    const ProviderScope(
-      child: OmniNexusApp(),
+    UncontrolledProviderScope(
+      container: container,
+      child: const OmniNexusApp(),
     ),
   );
 }
