@@ -19,6 +19,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # Crea el archivo .env para evitar que el empaquetado de assets falle
+      - name: Create dummy .env file
+        run: touch .env
+
       - name: Build macOS App
         run: flutter build macos --release
 
