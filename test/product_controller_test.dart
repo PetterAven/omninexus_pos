@@ -48,7 +48,7 @@ void main() {
 
     final notifier = container.read(productControllerProvider.notifier);
     final result = await notifier.addProduct(
-      Product(code: codigoNuevo, name: 'Producto Nuevo', price: 25.0, stock: 10),
+      const Product(code: codigoNuevo, name: 'Producto Nuevo', price: 25.0, stock: 10),
     );
 
     expect(result, ProductSaveResult.success);
@@ -63,10 +63,10 @@ void main() {
 
     final notifier = container.read(productControllerProvider.notifier);
     await notifier.addProduct(
-      Product(code: codigoDuplicado, name: 'Original', price: 10.0, stock: 5),
+      const Product(code: codigoDuplicado, name: 'Original', price: 10.0, stock: 5),
     );
     final result = await notifier.addProduct(
-      Product(code: codigoDuplicado, name: 'Intento duplicado', price: 99.0, stock: 1),
+      const Product(code: codigoDuplicado, name: 'Intento duplicado', price: 99.0, stock: 1),
     );
 
     expect(result, ProductSaveResult.duplicateCode);
@@ -83,10 +83,10 @@ void main() {
 
     final notifier = container.read(productControllerProvider.notifier);
     await notifier.addProduct(
-      Product(code: codigoActualizar, name: 'Antes', price: 10.0, stock: 5),
+      const Product(code: codigoActualizar, name: 'Antes', price: 10.0, stock: 5),
     );
     await notifier.updateProduct(
-      Product(code: codigoActualizar, name: 'Después', price: 12.5, stock: 3),
+      const Product(code: codigoActualizar, name: 'Después', price: 12.5, stock: 3),
     );
 
     final productos = container.read(productControllerProvider).value ?? [];
@@ -103,7 +103,7 @@ void main() {
 
     final notifier = container.read(productControllerProvider.notifier);
     await notifier.addProduct(
-      Product(code: codigoEliminar, name: 'A borrar', price: 5.0, stock: 1),
+      const Product(code: codigoEliminar, name: 'A borrar', price: 5.0, stock: 1),
     );
     await notifier.deleteProduct(codigoEliminar);
 

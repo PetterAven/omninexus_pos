@@ -50,7 +50,7 @@ void main() {
     });
 
     test('1. Inserta un producto y lo encuentra por código', () async {
-      final product = Product(
+      final product = const Product(
         code: '75010001',
         name: 'Refresco 600ml',
         price: 18.50,
@@ -66,14 +66,14 @@ void main() {
     });
 
     test('2. Actualiza el stock de un producto existente', () async {
-      await productRepo.insertProduct(Product(
+      await productRepo.insertProduct(const Product(
         code: '75010002',
         name: 'Galletas',
         price: 12.0,
         stock: 20,
       ));
 
-      await productRepo.updateProduct(Product(
+      await productRepo.updateProduct(const Product(
         code: '75010002',
         name: 'Galletas',
         price: 12.0,
@@ -85,7 +85,7 @@ void main() {
     });
 
     test('3. Elimina un producto y ya no aparece en la búsqueda', () async {
-      await productRepo.insertProduct(Product(
+      await productRepo.insertProduct(const Product(
         code: '75010003',
         name: 'Agua 1L',
         price: 15.0,

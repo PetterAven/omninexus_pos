@@ -37,13 +37,12 @@ class SalesRepository {
       finalSaleId = insertedSale['id'] as int;
 
       for (final item in cartItems) {
-        // Se realiza casteo .round() / .toInt() para asegurar compatibilidad con SaleDetail
         final detail = SaleDetail(
           saleId: finalSaleId,
           productCode: item.product.code,
           productName: item.product.name,
           price: item.product.price,
-          quantity: item.quantity.round(), 
+          quantity: item.quantity,
         );
 
         await _supabase
@@ -55,7 +54,7 @@ class SalesRepository {
         try {
           await _supabase.rpc('decrement_stock', params: {
             'row_code': item.product.code,
-            'quantity_to_sub': item.quantity.round(),
+            'quantity_to_sub': item.quantity,
           }).timeout(AppConstants.networkTimeout);
         } catch (_) {}
       }
@@ -85,14 +84,15 @@ class SalesRepository {
           productCode: item.product.code,
           productName: item.product.name,
           price: item.product.price,
-          quantity: item.quantity.round(),
+          quantity: item.quantity,
         );
         await txn.insert('sale_details', detail.toInsertMap());
 
-        // Actualización directa del inventario local (descuenta la cantidad entera)
+        // Actualización directa del inventario local (descuenta el
+        // peso/cantidad exacta, ya sin redondear a entero).
         await txn.execute(
           'UPDATE products SET stock = stock - ? WHERE code = ?',
-          [item.quantity.round(), item.product.code],
+          [item.quantity, item.product.code],
         );
       }
 

@@ -27,7 +27,10 @@ class TicketPdfService {
     final pdf = pw.Document();
     double subtotalImpuestos = total / 1.16;
     double ivaCalculado = total - subtotalImpuestos;
-    int totalArticulos = items.fold(0, (sum, item) => sum + (item['quantity'] as int));
+    // CORREGIDO: mismo bug que en TicketTelegramService -- quantity ya
+    // es double desde CartItem, el `as int` tronaba al imprimir/generar
+    // el PDF del ticket.
+    num totalArticulos = items.fold(0, (sum, item) => sum + ((item['quantity'] as num?) ?? 0));
 
     pdf.addPage(
       pw.Page(

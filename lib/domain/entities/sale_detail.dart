@@ -1,13 +1,19 @@
 /// Entidad de dominio: un renglón del detalle de una venta ya
 /// registrada (a diferencia de [CartItem], este ya tiene `saleId` y,
 /// una vez guardado, un `id` propio).
+///
+/// v1.1.0: `quantity` pasa de `int` a `double`, igual que en [CartItem],
+/// para no perder precisión al vender productos a granel (ej. 1.450 kg
+/// de queso). Antes de este cambio, se estaba usando `.round()` al
+/// registrar la venta -- eso truncaba el peso real a un entero y
+/// descontaba mal el stock (1.450 kg se guardaba y descontaba como 1).
 class SaleDetail {
   final int? id;
   final int saleId;
   final String productCode;
   final String productName;
   final double price;
-  final int quantity;
+  final double quantity;
 
   const SaleDetail({
     this.id,
@@ -24,7 +30,7 @@ class SaleDetail {
         productCode: map['product_code'].toString(),
         productName: map['product_name'].toString(),
         price: double.parse(map['price'].toString()),
-        quantity: int.parse(map['quantity'].toString()),
+        quantity: double.parse(map['quantity'].toString()),
       );
 
   /// Incluye `id`. Úsalo cuando el renglón ya existe (p.ej. al sincronizar

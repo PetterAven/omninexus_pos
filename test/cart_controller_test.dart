@@ -12,9 +12,9 @@ void main() {
     addTearDown(container.dispose);
   });
 
-  final refresco = Product(code: 'T001', name: 'Refresco', price: 18.50, stock: 5);
-  final soloUno = Product(code: 'T002', name: 'Ítem con stock 1', price: 10.0, stock: 1);
-  final sinStock = Product(code: 'T003', name: 'Sin stock', price: 20.0, stock: 0);
+  final refresco = const Product(code: 'T001', name: 'Refresco', price: 18.50, stock: 5);
+  final soloUno = const Product(code: 'T002', name: 'Ítem con stock 1', price: 10.0, stock: 1);
+  final sinStock = const Product(code: 'T003', name: 'Sin stock', price: 20.0, stock: 0);
 
   group('CartController.addProduct', () {
     test('agrega un producto nuevo con cantidad 1', () {

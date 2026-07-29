@@ -19,7 +19,8 @@ void showTicketReceiptDialog(
 }) {
   double subtotalImpuestos = total / 1.16;
   double ivaCalculado = total - subtotalImpuestos;
-  int totalArticulos = items.fold(0, (sum, item) => sum + (item['quantity'] as int));
+  // CORREGIDO: mismo bug que en TicketTelegramService/TicketPdfService.
+  num totalArticulos = items.fold(0, (sum, item) => sum + ((item['quantity'] as num?) ?? 0));
 
   showDialog(
     context: context,

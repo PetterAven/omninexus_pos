@@ -113,8 +113,10 @@ class _CartAndSearchSectionState extends ConsumerState<CartAndSearchSection> {
 
   /// Pop-up emergente para ingresar la cantidad exacta (kilos, litros, gramos, etc.)
   Future<double?> _showBulkQuantityDialog(
-      BuildContext context, Product product) async {
-    final controller = TextEditingController();
+      BuildContext context, Product product,
+      {double? initialValue}) async {
+    final controller =
+        TextEditingController(text: initialValue?.toString() ?? '');
     final unitLabel = product.unit.isNotEmpty ? product.unit : 'kg';
 
     return showDialog<double>(
@@ -210,7 +212,7 @@ class _CartAndSearchSectionState extends ConsumerState<CartAndSearchSection> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: Container(
-                constraints: const BoxConstraints(maxHeight: 320),
+                constraints: const BoxConstraints(maxHeight: 300),
                 child: _isLoading
                     ? const Padding(
                         padding: EdgeInsets.all(16.0),
@@ -219,21 +221,13 @@ class _CartAndSearchSectionState extends ConsumerState<CartAndSearchSection> {
                     : _searchResults.isEmpty
                         ? const Padding(
                             padding: EdgeInsets.all(16.0),
-                            child: Text(
-                              'No se encontraron productos',
-                              style: TextStyle(color: Colors.grey),
-                              textAlign: TextAlign.center,
-                            ),
+                            child: Text('Sin resultados.'),
                           )
                         : ListView.separated(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
                             shrinkWrap: true,
                             itemCount: _searchResults.length,
-                            separatorBuilder: (_, __) => const Divider(
-                              height: 1,
-                              indent: 16,
-                              endIndent: 16,
-                            ),
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final product = _searchResults[index];
                               return InkWell(
@@ -424,6 +418,69 @@ class _CartAndSearchSectionState extends ConsumerState<CartAndSearchSection> {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              // Producto a granel: no tiene sentido picarle "+" de 1 en 1 kg,
+                              // así que aquí se reabre el diálogo de peso para editarlo.
+                              if (item.product.isWeighted)
+                                IconButton(
+                                  icon: const Icon(Icons.edit,
+                                      color: Colors.blue, size: 20),
+                                  tooltip: 'Editar cantidad',
+                                  onPressed: () async {
+                                    final nuevaCantidad =
+                                        await _showBulkQuantityDialog(
+                                      context,
+                                      item.product,
+                                      initialValue: item.quantity,
+                                    );
+                                    if (nuevaCantidad != null &&
+                                        nuevaCantidad > 0) {
+                                      ref
+                                          .read(
+                                              cartControllerProvider.notifier)
+                                          .updateQuantity(
+                                              index, nuevaCantidad);
+                                    }
+                                  },
+                                )
+                              else ...[
+                                IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline,
+                                      color: Colors.redAccent, size: 22),
+                                  onPressed: () {
+                                    ref
+                                        .read(cartControllerProvider.notifier)
+                                        .decreaseQuantity(index);
+                                  },
+                                ),
+                                Text(
+                                  item.quantity.toInt().toString(),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.add_circle_outline,
+                                      color: Colors.green, size: 22),
+                                  onPressed: () {
+                                    final result = ref
+                                        .read(cartControllerProvider.notifier)
+                                        .increaseQuantity(index);
+                                    if (result ==
+                                        CartOperationResult.noMoreStock) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                              'Sin más stock disponible de ${item.product.name}'),
+                                          backgroundColor: Colors.orange,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                ),
+                              ],
+                              const SizedBox(width: 8),
                               Text(
                                 '\$${item.subtotal.toStringAsFixed(2)}',
                                 style: const TextStyle(
@@ -431,7 +488,7 @@ class _CartAndSearchSectionState extends ConsumerState<CartAndSearchSection> {
                                   fontSize: 16,
                                 ),
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: 4),
                               IconButton(
                                 icon:
                                     const Icon(Icons.delete, color: Colors.red),

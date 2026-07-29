@@ -34,7 +34,13 @@ class TicketTelegramService {
 
     double subtotalImpuestos = total / 1.16;
     double ivaCalculado = total - subtotalImpuestos;
-    int totalArticulos = items.fold(0, (sum, item) => sum + (item['quantity'] as int));
+    // CORREGIDO: item['quantity'] viene de CartItem.toMap(), y
+    // CartItem.quantity es `double` desde que se agregó venta a granel
+    // (kg/litros con decimales). El `as int` de aquí era exactamente lo
+    // que tronaba con "type 'double' is not a subtype of type 'int'"
+    // apenas se cobraba cualquier producto (incluso uno normal, porque
+    // 1.0 sigue siendo double). Con `num` acepta ambos sin crashear.
+    num totalArticulos = items.fold(0, (sum, item) => sum + ((item['quantity'] as num?) ?? 0));
 
     final buffer = StringBuffer();
     buffer.writeln('✳️ *ABARROTES DOÑA MARY - COMPROBANTE DE VENTA* ✳️');

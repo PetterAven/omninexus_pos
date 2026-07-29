@@ -20,11 +20,11 @@ class SalesTerminalScreen extends ConsumerStatefulWidget {
   const SalesTerminalScreen({super.key});
 
   @override
-  ConsumerState<SalesTerminalScreen> createState() => _SalesTerminalScreenState();
+  ConsumerState<SalesTerminalScreen> createState() =>
+      _SalesTerminalScreenState();
 }
 
 class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
-  // Controllers de texto y estado local de Telegram vinculados
   final SearchController _searchController = SearchController();
   final TextEditingController _cashController = TextEditingController();
 
@@ -66,11 +66,14 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
 
   // Manejo de resultado de agregación al carrito
   void _handleAddProduct(Product product) {
-    final result = ref.read(cartControllerProvider.notifier).addProduct(product);
+    final result =
+        ref.read(cartControllerProvider.notifier).addProduct(product);
     switch (result) {
       case CartOperationResult.outOfStock:
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Este producto no tiene stock disponible.')),
+          const SnackBar(
+            content: Text('Este producto no tiene stock disponible.'),
+          ),
         );
         break;
       case CartOperationResult.noMoreStock:
@@ -80,12 +83,18 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
         break;
       case CartOperationResult.invalidWeight:
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('El peso o cantidad ingresada no es válida.')),
+          const SnackBar(
+            content: Text('El peso o cantidad ingresada no es válida.'),
+          ),
         );
         break;
       case CartOperationResult.notApplicableForWeighted:
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Este producto se vende por peso. Ajusta la cantidad desde el carrito.')),
+          const SnackBar(
+            content: Text(
+              'Este producto se vende por peso. Ajusta la cantidad desde el carrito.',
+            ),
+          ),
         );
         break;
       case CartOperationResult.success:
@@ -109,11 +118,13 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
           TextButton(
             onPressed: () {
               ref.read(cartControllerProvider.notifier).clear();
-              setState(() {
-                _cashController.clear();
-                _linkedChatId = null;
-                _linkedUsername = null;
-              });
+              if (mounted) {
+                setState(() {
+                  _cashController.clear();
+                  _linkedChatId = null;
+                  _linkedUsername = null;
+                });
+              }
               ref.read(checkoutControllerProvider.notifier).reset();
               Navigator.pop(context);
             },
@@ -133,12 +144,12 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     );
 
     if (clienteVinculado != null) {
+      if (!mounted) return;
       setState(() {
         _linkedChatId = clienteVinculado['chat_id']?.toString();
         _linkedUsername = clienteVinculado['username'];
       });
 
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -156,7 +167,9 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('¿Cerrar sesión?'),
-        content: const Text('Se cerrará tu sesión y se descartará el carrito actual si tiene productos.'),
+        content: const Text(
+          'Se cerrará tu sesión y se descartará el carrito actual si tiene productos.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -167,7 +180,10 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
               Navigator.pop(context);
               _logout();
             },
-            child: const Text('Cerrar sesión', style: TextStyle(color: Colors.red)),
+            child: const Text(
+              'Cerrar sesión',
+              style: TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),
@@ -188,11 +204,13 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
   // ================= REACCIÓN AL RESULTADO DEL COBRO =================
   void _onCheckoutSuccess(CheckoutResult result) {
     ref.read(cartControllerProvider.notifier).clear();
-    setState(() {
-      _cashController.clear();
-      _linkedChatId = null;
-      _linkedUsername = null;
-    });
+    if (mounted) {
+      setState(() {
+        _cashController.clear();
+        _linkedChatId = null;
+        _linkedUsername = null;
+      });
+    }
 
     if (result.telegramWarning != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -232,14 +250,19 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('No se encontró ningún producto con el código "$code".'),
+          content: Text(
+            'No se encontró ningún producto con el código "$code".',
+          ),
         ),
       );
     }
   }
 
   // ================= SECCIÓN: BUSCADOR + CARRITO =================
-  Widget _buildSearchAndCart(BuildContext context, {required bool expandCart}) {
+  Widget _buildSearchAndCart(
+    BuildContext context, {
+    required bool expandCart,
+  }) {
     return CartAndSearchSection(
       expandCart: expandCart,
       searchController: _searchController,
@@ -337,7 +360,9 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => InventoryScreen(userRole: userRole ?? 'Cajero'),
+                          builder: (_) => InventoryScreen(
+                            userRole: userRole ?? 'Cajero',
+                          ),
                         ),
                       );
                     },
@@ -409,11 +434,11 @@ class _AppBarPillButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color resolvedIconColor = iconColor ?? Colors.white;
     final Color background = highlighted
-        ? Colors.white.withOpacity(0.16)
-        : Colors.white.withOpacity(0.06);
+        ? Colors.white.withValues(alpha: 0.16)
+        : Colors.white.withValues(alpha: 0.06);
     final Color border = highlighted
-        ? Colors.blue.shade300.withOpacity(0.6)
-        : Colors.white.withOpacity(0.14);
+        ? Colors.blue.shade300.withValues(alpha: 0.6)
+        : Colors.white.withValues(alpha: 0.14);
 
     return Material(
       color: background,
@@ -441,7 +466,9 @@ class _AppBarPillButton extends StatelessWidget {
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 12.5,
-                    fontWeight: highlighted ? FontWeight.bold : FontWeight.w500,
+                    fontWeight: highlighted
+                        ? FontWeight.bold
+                        : FontWeight.w500,
                   ),
                 ),
               ],

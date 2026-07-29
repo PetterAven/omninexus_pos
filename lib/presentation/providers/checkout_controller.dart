@@ -3,13 +3,9 @@ import '../../data/repositories/sales_repository.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../services/ticket_telegram_service.dart';
 import '../../services/ticket_pdf_service.dart';
+import '../../services/payment_terminal_service.dart';
 import 'sales_controller.dart';
 
-/// Lo que la pantalla necesita para pintar el ticket y el snackbar de
-/// aviso una vez que el cobro terminó bien. Se guarda aparte del
-/// `AsyncValue<void>` del notifier porque ese solo importa para saber
-/// si sigue cargando/si hubo error -- la pantalla no necesita "leer"
-/// datos de él para reconstruirse en cada frame.
 class CheckoutResult {
   final List<Map<String, dynamic>> items;
   final double total;
@@ -17,10 +13,6 @@ class CheckoutResult {
   final double change;
   final bool isCard;
   final String? linkedUsername;
-
-  /// Aviso de Telegram (ej. "no se pudo enviar el ticket") que NO debe
-  /// marcar el cobro como fallido -- la venta ya quedó registrada y el
-  /// PDF ya se generó, solo es una advertencia informativa.
   final String? telegramWarning;
 
   const CheckoutResult({
@@ -34,18 +26,11 @@ class CheckoutResult {
   });
 }
 
-/// AsyncNotifier<void>: el cobro no "posee" un dato que la UI deba leer
-/// en reposo (a diferencia de un carrito o una lista). Solo interesan
-/// sus tres estados -- loading mientras se procesa el pago, error si
-/// algo truena (monto insuficiente, falla de red al registrar la
-/// venta), y data (null) cuando terminó bien.
 class CheckoutController extends AsyncNotifier<void> {
   CheckoutResult? lastResult;
 
   @override
-  Future<void> build() async {
-    // Sin nada que cargar al inicio: arranca directo en data(null).
-  }
+  Future<void> build() async {}
 
   Future<void> payCash({
     required double total,
@@ -74,6 +59,17 @@ class CheckoutController extends AsyncNotifier<void> {
     String? linkedChatId,
     String? linkedUsername,
   }) async {
+    state = const AsyncLoading();
+
+    // NUEVO: intenta el cobro real contra la terminal configurada
+    // (Clip / Mercado Pago) antes de registrar la venta. Si la terminal
+    // rechaza o no hay credenciales, la venta NO se guarda.
+    final chargeResult = await PaymentTerminalService.instance.chargeCard(total);
+    if (!chargeResult.success) {
+      state = AsyncError(chargeResult.message, StackTrace.current);
+      return;
+    }
+
     await _process(
       total: total,
       cashReceived: total,
@@ -100,11 +96,6 @@ class CheckoutController extends AsyncNotifier<void> {
 
       await SalesRepository.instance.registerSale(total, cartItems);
 
-      // CORREGIDO: salesControllerProvider cachea su AsyncNotifier<List<Sale>>
-      // hasta que algo lo invalide -- sin esto, el Panel de Control seguía
-      // mostrando el corte de caja de antes de esta venta hasta que la app
-      // se reiniciaba. invalidate() lo marca sucio; se recalcula solo la
-      // próxima vez que algo lo escuche (p.ej. al abrir showSalesReportDialog).
       ref.invalidate(salesControllerProvider);
 
       final telegramError = await TicketTelegramService.instance.sendReceipt(
@@ -138,8 +129,6 @@ class CheckoutController extends AsyncNotifier<void> {
     });
   }
 
-  /// Limpia el resultado guardado para que un próximo cobro no arrastre
-  /// datos del anterior si algo llega a leerlo antes de tiempo.
   void reset() {
     lastResult = null;
     state = const AsyncData(null);

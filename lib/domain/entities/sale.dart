@@ -12,8 +12,8 @@ class Sale {
   });
 
   factory Sale.fromMap(Map<String, dynamic> map) => Sale(
-        id: map['id'] as int,
-        total: double.parse(map['total'].toString()),
+        id: (map['id'] as num).toInt(),
+        total: (map['total'] as num).toDouble(),
         date: map['date'].toString(),
       );
 
