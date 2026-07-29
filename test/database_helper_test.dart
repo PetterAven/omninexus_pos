@@ -22,7 +22,8 @@ void main() {
     try {
       await Supabase.initialize(
         url: 'https://fake-project-para-pruebas.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
+        publishableKey:
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
       );
     } catch (_) {
       // Si ya fue inicializado por otra suite de pruebas, se ignora el error
