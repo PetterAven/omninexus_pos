@@ -8,96 +8,296 @@ import '../../providers/sales_controller.dart';
 import '../../providers/user_controller.dart';
 import 'sales_export_service.dart';
 
-void showCreateUserDialog(
-  BuildContext context,
-  WidgetRef ref, {
-  required String currentOperatorRole,
-}) {
-  final userCtrl = TextEditingController();
-  final passCtrl = TextEditingController();
-  String selectedRole = 'Cajero';
+// --- DIÁLOGO PARA CREAR USUARIOS ---
 
-  showDialog(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (dialogContext, setInnerState) => AlertDialog(
-        title: const Text('Nueva Cuenta de Empleado', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Column(
+class CreateUserDialog extends ConsumerStatefulWidget {
+  final String currentOperatorRole;
+
+  const CreateUserDialog({
+    super.key,
+    required this.currentOperatorRole,
+  });
+
+  @override
+  ConsumerState<CreateUserDialog> createState() => _CreateUserDialogState();
+}
+
+class _CreateUserDialogState extends ConsumerState<CreateUserDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _userCtrl;
+  late final TextEditingController _passCtrl;
+
+  String _selectedRole = 'Cajero';
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _userCtrl = TextEditingController();
+    _passCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _userCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final result = await ref.read(userControllerProvider.notifier).addUser(
+            currentOperatorRole: widget.currentOperatorRole,
+            username: _userCtrl.text.trim(),
+            password: _passCtrl.text,
+            role: _selectedRole,
+          );
+
+      if (!mounted) return;
+
+      if (result == UserSaveResult.notAuthorized) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Acceso Denegado: Tu rol actual (${widget.currentOperatorRole}) no tiene autorización para dar de alta cuentas.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text(
+        'Nueva Cuenta de Empleado',
+        style: TextStyle(fontWeight: FontWeight.bold),
+      ),
+      content: Form(
+        key: _formKey,
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: userCtrl,
-              decoration: const InputDecoration(labelText: 'Nombre de Usuario', prefixIcon: Icon(Icons.person)),
+            TextFormField(
+              controller: _userCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nombre de Usuario',
+                prefixIcon: Icon(Icons.person),
+              ),
+              validator: (val) {
+                if (val == null || val.trim().isEmpty) {
+                  return 'El nombre de usuario es obligatorio';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 10),
-            TextField(
-              controller: passCtrl,
+            TextFormField(
+              controller: _passCtrl,
               obscureText: true,
-              decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock)),
+              decoration: const InputDecoration(
+                labelText: 'Contraseña',
+                prefixIcon: Icon(Icons.lock),
+              ),
+              validator: (val) {
+                if (val == null || val.isEmpty) {
+                  return 'La contraseña es obligatoria';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 15),
             DropdownButtonFormField<String>(
-              value: selectedRole,
-              decoration: const InputDecoration(labelText: 'Puesto', prefixIcon: Icon(Icons.badge)),
+              value: _selectedRole,
+              decoration: const InputDecoration(
+                labelText: 'Puesto',
+                prefixIcon: Icon(Icons.badge),
+              ),
               items: const [
                 DropdownMenuItem(value: 'Cajero', child: Text('Cajero')),
-                DropdownMenuItem(value: 'Administrador', child: Text('Administrador')),
+                DropdownMenuItem(
+                  value: 'Administrador',
+                  child: Text('Administrador'),
+                ),
               ],
               onChanged: (val) {
-                if (val != null) setInnerState(() => selectedRole = val);
+                if (val != null) setState(() => _selectedRole = val);
               },
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF232D37)),
-            onPressed: () async {
-              if (userCtrl.text.trim().isEmpty || passCtrl.text.isEmpty) return;
-              try {
-                final result = await ref.read(userControllerProvider.notifier).addUser(
-                      currentOperatorRole: currentOperatorRole,
-                      username: userCtrl.text.trim(),
-                      password: passCtrl.text,
-                      role: selectedRole,
-                    );
-
-                if (!dialogContext.mounted) return;
-
-                if (result == UserSaveResult.notAuthorized) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    SnackBar(content: Text('Acceso Denegado: Tu rol actual ($currentOperatorRole) no tiene autorización para dar de alta cuentas.')),
-                  );
-                  return;
-                }
-
-                Navigator.pop(dialogContext);
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      SyncStatus.lastSyncOk
-                          ? 'Cuenta creada y sincronizada con Supabase.'
-                          : '⚠️ Cuenta creada solo en este equipo: no se pudo sincronizar con Supabase.',
-                    ),
-                    backgroundColor: SyncStatus.lastSyncOk ? Colors.green : Colors.orange,
-                  ),
-                );
-              } catch (e) {
-                if (!dialogContext.mounted) return;
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-                );
-              }
-            },
-            child: const Text('Crear', style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
+      actions: [
+        TextButton(
+          onPressed: _isLoading ? null : () => Navigator.pop(context, false),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF232D37),
+          ),
+          onPressed: _isLoading ? null : _submit,
+          child: _isLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text('Crear', style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+}
+
+Future<void> showCreateUserDialog(
+  BuildContext context,
+  WidgetRef ref, {
+  required String currentOperatorRole,
+}) async {
+  final created = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => CreateUserDialog(
+      currentOperatorRole: currentOperatorRole,
     ),
   );
+
+  if (created == true && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          SyncStatus.lastSyncOk
+              ? 'Cuenta creada y sincronizada con Supabase.'
+              : '⚠️ Cuenta creada solo en este equipo: no se pudo sincronizar con Supabase.',
+        ),
+        backgroundColor:
+            SyncStatus.lastSyncOk ? Colors.green : Colors.orange,
+      ),
+    );
+  }
 }
+
+// --- ITEM DE LA LISTA DE VENTAS ---
+
+class SaleTileItem extends StatefulWidget {
+  final dynamic sale;
+
+  const SaleTileItem({super.key, required this.sale});
+
+  @override
+  State<SaleTileItem> createState() => _SaleTileItemState();
+}
+
+class _SaleTileItemState extends State<SaleTileItem> {
+  Future<List<SaleDetail>>? _detailsFuture;
+
+  @override
+  Widget build(BuildContext context) {
+    final saleId = widget.sale.id;
+
+    return ExpansionTile(
+      leading: const Icon(Icons.receipt_long, color: Colors.blueGrey),
+      title: Text('Ticket ID: #$saleId'),
+      subtitle: Text(
+        widget.sale.date.length >= 19
+            ? widget.sale.date.substring(11, 19)
+            : widget.sale.date,
+      ),
+      trailing: Text(
+        '\$${widget.sale.total.toStringAsFixed(2)}',
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+      onExpansionChanged: (expanded) {
+        if (expanded && _detailsFuture == null && mounted) {
+          setState(() {
+            _detailsFuture = SalesRepository.instance.getSaleDetails(saleId);
+          });
+        }
+      },
+      children: [
+        if (_detailsFuture == null)
+          const SizedBox.shrink()
+        else
+          FutureBuilder<List<SaleDetail>>(
+            future: _detailsFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                );
+              }
+              final details = snapshot.data ?? [];
+              if (details.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    'Sin desglose disponible para este ticket.',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                );
+              }
+              return Column(
+                children: details.map((item) {
+                  final qty = item.quantity;
+                  final price = item.price;
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${item.productName} x$qty',
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        Text(
+                          '\$${(price * qty).toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
+
+// --- PANEL PRINCIPAL DE VENTAS / CORTES ---
 
 void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
   final userRole = ref.read(currentUserProvider)?.role ?? 'Cajero';
@@ -130,14 +330,20 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                     if (isAdmin) {
                       await ref.read(userControllerProvider.notifier).refresh();
                     }
-                    if (!SyncStatus.lastSyncOk && dialogContext.mounted) {
-                      ScaffoldMessenger.of(dialogContext).showSnackBar(
-                        const SnackBar(content: Text('⚠️ No se pudo sincronizar con Supabase.'), backgroundColor: Colors.orange),
+                    if (!SyncStatus.lastSyncOk && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('⚠️ No se pudo sincronizar con Supabase.'),
+                          backgroundColor: Colors.orange,
+                        ),
                       );
                     }
                   },
                 ),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(dialogContext)),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(dialogContext),
+                ),
               ],
             ),
           ],
@@ -203,56 +409,7 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                                   return ListView.builder(
                                     itemCount: sales.length,
                                     itemBuilder: (context, index) {
-                                      final sale = sales[index];
-                                      final saleId = sale.id;
-                                      return ExpansionTile(
-                                        leading: const Icon(Icons.receipt_long, color: Colors.blueGrey),
-                                        title: Text('Ticket ID: #$saleId'),
-                                        subtitle: Text(sale.date.length >= 19 ? sale.date.substring(11, 19) : sale.date),
-                                        trailing: Text('\$${sale.total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                        children: [
-                                          FutureBuilder<List<SaleDetail>>(
-                                            future: SalesRepository.instance.getSaleDetails(saleId),
-                                            builder: (context, snapshot) {
-                                              if (snapshot.connectionState == ConnectionState.waiting) {
-                                                return const Padding(
-                                                  padding: EdgeInsets.all(12),
-                                                  child: SizedBox(
-                                                    height: 20,
-                                                    width: 20,
-                                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                                  ),
-                                                );
-                                              }
-                                              final details = snapshot.data ?? [];
-                                              if (details.isEmpty) {
-                                                return const Padding(
-                                                  padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-                                                  child: Text('Sin desglose disponible para este ticket.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                                                );
-                                              }
-                                              return Column(
-                                                children: details.map((item) {
-                                                  final qty = item.quantity;
-                                                  final price = item.price;
-                                                  return Padding(
-                                                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                                                    child: Row(
-                                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                                      children: [
-                                                        Expanded(
-                                                          child: Text('${item.productName} x$qty', style: const TextStyle(fontSize: 13)),
-                                                        ),
-                                                        Text('\$${(price * qty).toStringAsFixed(2)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                                                      ],
-                                                    ),
-                                                  );
-                                                }).toList(),
-                                              );
-                                            },
-                                          ),
-                                        ],
-                                      );
+                                      return SaleTileItem(sale: sales[index]);
                                     },
                                   );
                                 },

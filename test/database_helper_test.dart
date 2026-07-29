@@ -17,11 +17,16 @@ void main() {
 
     SharedPreferences.setMockInitialValues({});
 
-    await Supabase.initialize(
-      url: 'https://fake-project-para-pruebas.supabase.co',
-      publishableKey:
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
-    );
+    // Inicialización segura de Supabase para evitar excepciones en ejecuciones múltiples
+    try {
+      await Supabase.initialize(
+        url: 'https://fake-project-para-pruebas.supabase.co',
+        publishableKey:
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
+      );
+    } catch (_) {
+      // Si ya fue inicializado por otra suite de pruebas, se ignora el error
+    }
   });
 
   setUp(() async {
