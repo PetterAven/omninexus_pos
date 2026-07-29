@@ -2,9 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'package:omninexus_pos/data/datasources/local/app_database.dart';
-import 'package:omninexus_pos/data/repositories/product_repository.dart';
 import 'package:omninexus_pos/data/repositories/auth_repository.dart';
+import 'package:omninexus_pos/data/repositories/product_repository.dart';
 import 'package:omninexus_pos/domain/entities/product.dart';
 
 void main() {
@@ -21,8 +22,7 @@ void main() {
     try {
       await Supabase.initialize(
         url: 'https://fake-project-para-pruebas.supabase.co',
-        publishableKey:
-            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
+        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
       );
     } catch (_) {
       // Si ya fue inicializado por otra suite de pruebas, se ignora el error
@@ -55,7 +55,7 @@ void main() {
     });
 
     test('1. Inserta un producto y lo encuentra por código', () async {
-      final product = const Product(
+      const product = Product(
         code: '75010001',
         name: 'Refresco 600ml',
         price: 18.50,

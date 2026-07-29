@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../core/sync_status.dart';
 import '../../../data/repositories/sales_repository.dart';
 import '../../../domain/entities/sale_detail.dart';
@@ -8,7 +9,7 @@ import '../../providers/sales_controller.dart';
 import '../../providers/user_controller.dart';
 import 'sales_export_service.dart';
 
-// --- DIÁLOGO PARA CREAR USUARIOS ---
+// --- 1. DIÁLOGO PARA CREAR USUARIOS ---
 
 class CreateUserDialog extends ConsumerStatefulWidget {
   final String currentOperatorRole;
@@ -63,7 +64,7 @@ class _CreateUserDialogState extends ConsumerState<CreateUserDialog> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Acceso Denegado: Tu rol actual (${widget.currentOperatorRole}) no tiene autorización para dar de alta cuentas.',
+              'Acceso Denegado: Tu rol actual (${widget.currentOperatorRole}) no tiene autorización.',
             ),
           ),
         );
@@ -190,16 +191,15 @@ Future<void> showCreateUserDialog(
         content: Text(
           SyncStatus.lastSyncOk
               ? 'Cuenta creada y sincronizada con Supabase.'
-              : '⚠️ Cuenta creada solo en este equipo: no se pudo sincronizar con Supabase.',
+              : '⚠️ Cuenta creada localmente: sin conexión a Supabase.',
         ),
-        backgroundColor:
-            SyncStatus.lastSyncOk ? Colors.green : Colors.orange,
+        backgroundColor: SyncStatus.lastSyncOk ? Colors.green : Colors.orange,
       ),
     );
   }
 }
 
-// --- ITEM DE LA LISTA DE VENTAS ---
+// --- 2. ELEMENTO DESPLEGABLE DE VENTAS (DESGLOSE) ---
 
 class SaleTileItem extends StatefulWidget {
   final dynamic sale;
@@ -297,7 +297,7 @@ class _SaleTileItemState extends State<SaleTileItem> {
   }
 }
 
-// --- PANEL PRINCIPAL DE VENTAS / CORTES ---
+// --- 3. PANEL DE CONTROL Y CORTE DE CAJA ---
 
 void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
   final userRole = ref.read(currentUserProvider)?.role ?? 'Cajero';
@@ -324,19 +324,11 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
               children: [
                 IconButton(
                   icon: const Icon(Icons.refresh),
-                  tooltip: 'Sincronizar con Supabase',
+                  tooltip: 'Sincronizar',
                   onPressed: () async {
                     await ref.read(salesControllerProvider.notifier).refresh();
                     if (isAdmin) {
                       await ref.read(userControllerProvider.notifier).refresh();
-                    }
-                    if (!SyncStatus.lastSyncOk && context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('⚠️ No se pudo sincronizar con Supabase.'),
-                          backgroundColor: Colors.orange,
-                        ),
-                      );
                     }
                   },
                 ),
@@ -380,13 +372,15 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    const Text('VENTAS ACUMULADAS:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                    Text('\$${granTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green)),
+                                    const Text('VENTAS ACUMULADAS:', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    Text(
+                                      '\$${granTotal.toStringAsFixed(2)}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green),
+                                    ),
                                   ],
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 6),
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton.icon(
@@ -395,22 +389,17 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                                 onPressed: sales.isEmpty ? null : () => exportSalesReport(dialogContext, sales),
                               ),
                             ),
-                            const SizedBox(height: 4),
                             Expanded(
                               child: salesAsync.when(
                                 loading: () => const Center(child: CircularProgressIndicator()),
-                                error: (error, stackTrace) => Center(
-                                  child: Text('No se pudo cargar el corte de caja: $error'),
-                                ),
+                                error: (err, _) => Center(child: Text('Error: $err')),
                                 data: (sales) {
                                   if (sales.isEmpty) {
                                     return const Center(child: Text('Sin movimientos hoy.'));
                                   }
                                   return ListView.builder(
                                     itemCount: sales.length,
-                                    itemBuilder: (context, index) {
-                                      return SaleTileItem(sale: sales[index]);
-                                    },
+                                    itemBuilder: (context, index) => SaleTileItem(sale: sales[index]),
                                   );
                                 },
                               ),
@@ -440,9 +429,7 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                               Expanded(
                                 child: usersAsync.when(
                                   loading: () => const Center(child: CircularProgressIndicator()),
-                                  error: (error, stackTrace) => Center(
-                                    child: Text('No se pudo cargar el personal: $error'),
-                                  ),
+                                  error: (err, _) => Center(child: Text('Error: $err')),
                                   data: (users) {
                                     if (users.isEmpty) {
                                       return const Center(child: Text('No hay cuentas creadas.'));
@@ -452,14 +439,13 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                                       itemBuilder: (context, index) {
                                         final user = users[index];
                                         return ListTile(
-                                          leading: const Icon(Icons.person_outline, color: Color(0xFF232D37)),
+                                          leading: const Icon(Icons.person_outline),
                                           title: Text(user.username, style: const TextStyle(fontWeight: FontWeight.bold)),
                                           subtitle: Text('Puesto: ${user.role}'),
                                           trailing: user.role == 'Administrador' || user.username == 'admin'
-                                              ? const Tooltip(message: 'Cuenta Raíz Protegida', child: Icon(Icons.shield, color: Colors.amber))
+                                              ? const Icon(Icons.shield, color: Colors.amber)
                                               : IconButton(
                                                   icon: const Icon(Icons.person_remove, color: Colors.redAccent),
-                                                  tooltip: 'Dar de baja inmediatamente',
                                                   onPressed: () async {
                                                     await ref.read(userControllerProvider.notifier).deleteUser(user.username);
                                                   },
