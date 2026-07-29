@@ -47,3 +47,17 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 .scannerwork/
+# Archivos de caché e índices locales de Gradle en Android
+/android/.gradle/
+/android/app/build/
+/android/.dart_tool/
+.gradle/
+
+# Plugins y configuraciones generadas por Flutter para Android/iOS
+.flutter-plugins
+.packages
+
+# Archivos de configuración local de la máquina del desarrollador
+/android/local.properties
+/ios/Flutter/Generated.xcconfig
+/ios/Flutter/flutter_export_environment.sh

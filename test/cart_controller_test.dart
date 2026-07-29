@@ -1,3 +1,4 @@
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omninexus_pos/domain/entities/cart_item.dart';
@@ -12,9 +13,9 @@ void main() {
     addTearDown(container.dispose);
   });
 
-  final refresco = const Product(code: 'T001', name: 'Refresco', price: 18.50, stock: 5);
-  final soloUno = const Product(code: 'T002', name: 'Ítem con stock 1', price: 10.0, stock: 1);
-  final sinStock = const Product(code: 'T003', name: 'Sin stock', price: 20.0, stock: 0);
+  const refresco = Product(code: 'T001', name: 'Refresco', price: 18.50, stock: 5);
+  const soloUno = Product(code: 'T002', name: 'Ítem con stock 1', price: 10.0, stock: 1);
+  const sinStock = Product(code: 'T003', name: 'Sin stock', price: 20.0, stock: 0);
 
   group('CartController.addProduct', () {
     test('agrega un producto nuevo con cantidad 1', () {
@@ -108,7 +109,7 @@ void main() {
     test('removeItem elimina el ítem sin importar la cantidad', () {
       final notifier = container.read(cartControllerProvider.notifier);
       notifier.addProduct(refresco);
-      notifier.addProduct(refresco); // cantidad 2
+      notifier.addProduct(refresco);
 
       notifier.removeItem(0);
 
@@ -147,7 +148,7 @@ void main() {
   });
 
   test('CartItem.subtotal se calcula como price * quantity', () {
-    final item = CartItem(product: refresco, quantity: 3);
+    const item = CartItem(product: refresco, quantity: 3);
     expect(item.subtotal, closeTo(55.50, 0.001));
   });
 }

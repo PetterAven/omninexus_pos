@@ -1,21 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class RechargeDialog extends StatefulWidget {
-  const RechargeDialog({super.key});
+  final Function(String carrier, String phone, double amount) onProcessRecharge;
+
+  const RechargeDialog({
+    super.key,
+    required this.onProcessRecharge,
+  });
 
   @override
   State<RechargeDialog> createState() => _RechargeDialogState();
 }
 
 class _RechargeDialogState extends State<RechargeDialog> {
-  final _phoneController = TextEditingController();
-  final _confirmPhoneController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _confirmPhoneController = TextEditingController();
 
-  String _selectedCarrier = 'Telcel';
-  double _selectedAmount = 100.0;
+  String? _selectedCarrier;
+  double? _selectedAmount;
 
-  final List<String> _carriers = ['Telcel', 'Movistar', 'AT&T', 'Bait', 'Unefon'];
-  final List<double> _amounts = [20.0, 30.0, 50.0, 100.0, 150.0, 200.0, 500.0];
+  final List<String> _carriers = ['Telcel', 'Movistar', 'AT&T', 'Unefon', 'Bait'];
+  final List<double> _amounts = [20, 30, 50, 100, 150, 200, 300, 500];
 
   @override
   void dispose() {
@@ -24,34 +30,47 @@ class _RechargeDialogState extends State<RechargeDialog> {
     super.dispose();
   }
 
-  void _processRecharge() {
+  void _submit() {
     final phone = _phoneController.text.trim();
     final confirmPhone = _confirmPhoneController.text.trim();
 
+    if (_selectedCarrier == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor selecciona una compañía.')),
+      );
+      return;
+    }
+
     if (phone.length != 10) {
-      _showError('El número debe tener exactamente 10 dígitos.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El número debe contener exactamente 10 dígitos.')),
+      );
       return;
     }
 
     if (phone != confirmPhone) {
-      _showError('Los números ingresados no coinciden.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Los números ingresados no coinciden.')),
+      );
       return;
     }
 
-    // Aquí irá la conexión a la API en producción
+    if (_selectedAmount == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor selecciona el monto de la recarga.')),
+      );
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    widget.onProcessRecharge(_selectedCarrier!, phone, _selectedAmount!);
     Navigator.of(context).pop();
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
       SnackBar(
+        content: Text('Recarga de \$$_selectedAmount para $phone ($_selectedCarrier) procesada.'),
         backgroundColor: Colors.green,
-        content: Text('Recarga de \$$_selectedAmount a $phone ($_selectedCarrier) procesada con éxito.'),
       ),
-    );
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(backgroundColor: Colors.red, content: Text(message)),
     );
   }
 
@@ -62,79 +81,75 @@ class _RechargeDialogState extends State<RechargeDialog> {
         children: [
           Icon(Icons.phone_android, color: Colors.blue),
           SizedBox(width: 8),
-          Text('Recargas y Paquetes'),
+          Text('Recarga Telefónica'),
         ],
       ),
       content: SingleChildScrollView(
-        child: SizedBox(
-          width: 380,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Selector de Compañía
-              DropdownButtonFormField<String>(
-                value: _selectedCarrier,
-                decoration: const InputDecoration(
-                  labelText: 'Compañía Telefónica',
-                  border: OutlineInputBorder(),
-                ),
-                items: _carriers.map((carrier) {
-                  return DropdownMenuItem(value: carrier, child: Text(carrier));
-                }).toList(),
-                onChanged: (val) {
-                  if (val != null) setState(() => _selectedCarrier = val);
-                },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Compañía:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8.0,
+              children: _carriers.map((carrier) {
+                final isSelected = _selectedCarrier == carrier;
+                return ChoiceChip(
+                  label: Text(carrier),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() {
+                      _selectedCarrier = selected ? carrier : null;
+                    });
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              maxLength: 10,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: 'Número Telefónico (10 dígitos)',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.phone),
               ),
-              const SizedBox(height: 16),
-
-              // Número Telefónico
-              TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-                decoration: const InputDecoration(
-                  labelText: 'Número telefónico (10 dígitos)',
-                  prefixIcon: Icon(Icons.dialpad),
-                  border: OutlineInputBorder(),
-                ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _confirmPhoneController,
+              keyboardType: TextInputType.phone,
+              maxLength: 10,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: 'Confirmar Número',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.check_circle_outline),
               ),
-              const SizedBox(height: 8),
-
-              // Confirmación de Número (Seguridad para evitar errores)
-              TextField(
-                controller: _confirmPhoneController,
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-                decoration: const InputDecoration(
-                  labelText: 'Confirmar número telefónico',
-                  prefixIcon: Icon(Icons.check_circle_outline),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              const Text('Monto / Paquete:', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-
-              // Enrejado de Montos
-              Wrap(
-                spacing: 8.0,
-                runSpacing: 8.0,
-                children: _amounts.map((amount) {
-                  final isSelected = _selectedAmount == amount;
-                  return ChoiceChip(
-                    label: Text('\$${amount.toInt()}'),
-                    selected: isSelected,
-                    selectedColor: Colors.blue.shade100,
-                    onSelected: (selected) {
-                      if (selected) setState(() => _selectedAmount = amount);
-                    },
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Monto:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8.0,
+              runSpacing: 4.0,
+              children: _amounts.map((amount) {
+                final isSelected = _selectedAmount == amount;
+                return ChoiceChip(
+                  label: Text('\$${amount.toInt()}'),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() {
+                      _selectedAmount = selected ? amount : null;
+                    });
+                  },
+                );
+              }).toList(),
+            ),
+          ],
         ),
       ),
       actions: [
@@ -143,19 +158,10 @@ class _RechargeDialogState extends State<RechargeDialog> {
           child: const Text('Cancelar'),
         ),
         ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-          onPressed: _processRecharge,
-          child: const Text('Vender Recarga', style: TextStyle(color: Colors.white)),
+          onPressed: _submit,
+          child: const Text('Realizar Recarga'),
         ),
       ],
     );
   }
-}
-
-// Función auxiliar para invocar el diálogo fácilmente
-void showRechargeDialog(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (ctx) => const RechargeDialog(),
-  );
 }
