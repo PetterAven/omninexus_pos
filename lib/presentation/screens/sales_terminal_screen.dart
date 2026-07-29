@@ -24,10 +24,7 @@ class SalesTerminalScreen extends ConsumerStatefulWidget {
 }
 
 class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
-  // CORREGIDO: el carrito ya no vive aquí -- se movió a
-  // cartControllerProvider (ver providers/cart_controller.dart). Este
-  // State ya solo guarda lo que es puramente de esta pantalla: los
-  // controllers de texto y el cliente de Telegram vinculado.
+  // Controllers de texto y estado local de Telegram vinculados
   final SearchController _searchController = SearchController();
   final TextEditingController _cashController = TextEditingController();
 
@@ -67,10 +64,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     );
   }
 
-  // CORREGIDO: reemplaza a la antigua _addProductToCart. La lógica de
-  // stock/duplicados ahora vive en CartController.addProduct(); aquí
-  // solo interpretamos el resultado para decidir qué SnackBar mostrar
-  // (el controller no conoce BuildContext, y no debe conocerlo).
+  // Manejo de resultado de agregación al carrito
   void _handleAddProduct(Product product) {
     final result = ref.read(cartControllerProvider.notifier).addProduct(product);
     switch (result) {
@@ -82,6 +76,16 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
       case CartOperationResult.noMoreStock:
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No hay más stock disponible.')),
+        );
+        break;
+      case CartOperationResult.invalidWeight:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('El peso o cantidad ingresada no es válida.')),
+        );
+        break;
+      case CartOperationResult.notApplicableForWeighted:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Este producto se vende por peso. Ajusta la cantidad desde el carrito.')),
         );
         break;
       case CartOperationResult.success:
@@ -147,16 +151,6 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
   }
 
   // ================= CIERRE DE SESIÓN =================
-  // NUEVO (Sprint 4, Paso 1): antes no existía ningún flujo para llamar
-  // a AuthController.logout() -- el método existía pero nada de la UI
-  // lo invocaba. Además de cerrar la sesión, hay que invalidar
-  // cartControllerProvider y checkoutControllerProvider explícitamente:
-  // como viven en el ProviderScope raíz de main.dart (no por ruta), si
-  // no se invalidan aquí, el siguiente cajero que inicie sesión
-  // heredaría el carrito y el último ticket cobrado del anterior.
-  // El estado local de este State (_linkedChatId, _cashController, etc.)
-  // no necesita limpiarse a mano: pushAndRemoveUntil saca por completo
-  // a SalesTerminalScreen del árbol, así que ese State se destruye solo.
   void _confirmLogout() {
     showDialog(
       context: context,
@@ -192,9 +186,6 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
   }
 
   // ================= REACCIÓN AL RESULTADO DEL COBRO =================
-  // Se llama desde el ref.listen del build() cuando el checkoutControllerProvider
-  // pasa de loading a data(null) con éxito: pinta el ticket, limpia el
-  // carrito y muestra el aviso de Telegram si lo hubo.
   void _onCheckoutSuccess(CheckoutResult result) {
     ref.read(cartControllerProvider.notifier).clear();
     setState(() {
@@ -292,7 +283,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
             return Text(
               isNarrow
                   ? 'Ventas'
-                  : 'Terminal de Ventas - Modulo: ${userRole ?? "General"}',
+                  : 'Terminal de Ventas - Módulo: ${userRole ?? "General"}',
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -313,125 +304,49 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
             builder: (context) {
               final isNarrow = MediaQuery.of(context).size.width < 600;
 
-              if (!isNarrow) {
-                return Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: Icon(
-                        _linkedChatId != null
-                            ? Icons.telegram
-                            : Icons.telegram_outlined,
-                        color: _linkedChatId != null
-                            ? Colors.blue.shade300
-                            : Colors.white60,
-                      ),
-                      label: Text(
-                        _linkedUsername != null
-                            ? '@$_linkedUsername'
-                            : 'Vincular Cliente',
-                        style: TextStyle(
-                          fontWeight: _linkedChatId != null
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
-                      ),
-                      onPressed: _abrirVinculacionTelegram,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.analytics_outlined),
-                      tooltip: 'Corte y Personal',
-                      onPressed: () => showSalesReportDialog(context, ref),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.inventory_2_outlined),
-                      tooltip: 'Inventario',
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => InventoryScreen(userRole: userRole ?? 'Cajero'),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(width: 10),
-                  ],
-                );
-              }
-
-              return PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert),
-                onSelected: (value) {
-                  switch (value) {
-                    case 'telegram':
-                      _abrirVinculacionTelegram();
-                      break;
-                    case 'corte':
-                      showSalesReportDialog(context, ref);
-                      break;
-                    case 'inventario':
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _AppBarPillButton(
+                    icon: _linkedChatId != null
+                        ? Icons.telegram
+                        : Icons.telegram_outlined,
+                    iconColor: _linkedChatId != null
+                        ? Colors.blue.shade300
+                        : Colors.white60,
+                    label: _linkedUsername != null
+                        ? '@$_linkedUsername'
+                        : 'Cliente',
+                    showLabel: !isNarrow,
+                    highlighted: _linkedChatId != null,
+                    onPressed: _abrirVinculacionTelegram,
+                  ),
+                  const SizedBox(width: 6),
+                  _AppBarPillButton(
+                    icon: Icons.analytics_outlined,
+                    label: 'Corte',
+                    showLabel: !isNarrow,
+                    onPressed: () => showSalesReportDialog(context, ref),
+                  ),
+                  const SizedBox(width: 6),
+                  _AppBarPillButton(
+                    icon: Icons.inventory_2_outlined,
+                    label: 'Inventario',
+                    showLabel: !isNarrow,
+                    onPressed: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (_) => InventoryScreen(userRole: userRole ?? 'Cajero'),
                         ),
                       );
-                      break;
-                  }
-                },
-                itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'telegram',
-                    child: Row(
-                      children: [
-                        Icon(
-                          _linkedChatId != null
-                              ? Icons.telegram
-                              : Icons.telegram_outlined,
-                          color:
-                              _linkedChatId != null ? Colors.blue : Colors.grey,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          _linkedUsername != null
-                              ? '@$_linkedUsername'
-                              : 'Vincular Cliente',
-                        ),
-                      ],
-                    ),
+                    },
                   ),
-                  const PopupMenuItem(
-                    value: 'corte',
-                    child: Row(
-                      children: [
-                        Icon(Icons.analytics_outlined, color: Colors.grey),
-                        SizedBox(width: 10),
-                        Text('Corte y Personal'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'inventario',
-                    child: Row(
-                      children: [
-                        Icon(Icons.inventory_2_outlined, color: Colors.grey),
-                        SizedBox(width: 10),
-                        Text('Inventario'),
-                      ],
-                    ),
-                  ),
+                  const SizedBox(width: 6),
                 ],
               );
             },
           ),
-          // NUEVO (Sprint 4, Paso 1): botón de cierre de sesión, siempre
-          // visible (fuera del Builder isNarrow/PopupMenu) porque cerrar
-          // sesión es una acción crítica que no debería quedar escondida
-          // detrás de un menú de tres puntos en pantallas angostas.
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Cerrar sesión',
@@ -468,6 +383,71 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _AppBarPillButton extends StatelessWidget {
+  final IconData icon;
+  final Color? iconColor;
+  final String label;
+  final bool showLabel;
+  final bool highlighted;
+  final VoidCallback onPressed;
+
+  const _AppBarPillButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.iconColor,
+    this.showLabel = true,
+    this.highlighted = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color resolvedIconColor = iconColor ?? Colors.white;
+    final Color background = highlighted
+        ? Colors.white.withOpacity(0.16)
+        : Colors.white.withOpacity(0.06);
+    final Color border = highlighted
+        ? Colors.blue.shade300.withOpacity(0.6)
+        : Colors.white.withOpacity(0.14);
+
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onPressed,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: border, width: 1),
+          ),
+          padding: EdgeInsets.symmetric(
+            horizontal: showLabel ? 12 : 8,
+            vertical: 8,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: resolvedIconColor),
+              if (showLabel) ...[
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: highlighted ? FontWeight.bold : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

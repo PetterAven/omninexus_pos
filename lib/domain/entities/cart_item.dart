@@ -1,13 +1,14 @@
 import 'product.dart';
 
 /// Entidad de dominio: un artículo dentro del carrito de la Terminal de
-/// Ventas. Envuelve el [Product] completo (no solo código/nombre/precio
-/// sueltos) para no perder el resto de sus datos (stock, etc.) mientras
-/// vive en el carrito, y para que `subtotal` siempre se calcule con el
-/// precio vigente del producto.
+/// Ventas.
+///
+/// v1.1.0: `quantity` pasa de `int` a `double` para poder representar
+/// tanto piezas enteras (`1.0`, `2.0`, productos con `isWeighted == false`)
+/// como pesos exactos (`1.450` kg, productos con `isWeighted == true`).
 class CartItem {
   final Product product;
-  final int quantity;
+  final double quantity;
 
   const CartItem({
     required this.product,
@@ -16,7 +17,7 @@ class CartItem {
 
   double get subtotal => product.price * quantity;
 
-  CartItem copyWith({Product? product, int? quantity}) => CartItem(
+  CartItem copyWith({Product? product, double? quantity}) => CartItem(
         product: product ?? this.product,
         quantity: quantity ?? this.quantity,
       );
@@ -28,6 +29,7 @@ class CartItem {
         'name': product.name,
         'price': product.price,
         'quantity': quantity,
+        'unit': product.unit,
         'subtotal': subtotal,
       };
 }

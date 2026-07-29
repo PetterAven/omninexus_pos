@@ -2,97 +2,130 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/product.dart';
 
-/// Resultado de agregar/incrementar un producto en el carrito. El
-/// controller no conoce BuildContext ni debe conocerlo -- es la UI
-/// (SalesTerminalScreen) la que decide qué SnackBar mostrar según este
-/// resultado.
 enum CartOperationResult {
   success,
-  outOfStock, // el producto no tiene stock desde el inicio
-  noMoreStock, // ya se alcanzó el stock disponible en el carrito
+  outOfStock,
+  noMoreStock,
+  invalidWeight,
+  notApplicableForWeighted,
 }
 
-/// Estado del carrito de la Terminal de Ventas.
-///
-/// Extraído de `_SalesTerminalScreenState`: antes vivía como
-/// `List<CartItem> _cart` + `_addProductToCart`/`_calculateTotal` dentro
-/// del State. Ahora es un Notifier para que el carrito no dependa de que
-/// SalesTerminalScreen siga montado, y para que cualquier otro punto de
-/// entrada (código de barras, sincronización remota, checkout) lea/mute
-/// el mismo estado sin pasar por callbacks del widget.
-class CartController extends Notifier<List<CartItem>> {
-  @override
-  List<CartItem> build() => [];
+class CartController extends StateNotifier<List<CartItem>> {
+  CartController() : super([]);
 
-  CartOperationResult addProduct(Product product) {
-    if (product.stock <= 0) return CartOperationResult.outOfStock;
-
-    final cart = state;
-    final existingIndex = cart.indexWhere((item) => item.product.code == product.code);
-
-    if (existingIndex >= 0) {
-      final currentItem = cart[existingIndex];
-      if (currentItem.quantity >= product.stock) {
-        return CartOperationResult.noMoreStock;
-      }
-      state = [
-        for (int i = 0; i < cart.length; i++)
-          if (i == existingIndex)
-            currentItem.copyWith(quantity: currentItem.quantity + 1)
-          else
-            cart[i],
-      ];
-    } else {
-      state = [...cart, CartItem(product: product, quantity: 1)];
+  /// Agrega un producto al carrito contemplando cantidades por peso o unidad.
+  CartOperationResult addProduct(
+    Product product, {
+    double quantity = 1.0,
+  }) {
+    if (quantity <= 0) {
+      return CartOperationResult.invalidWeight;
     }
+
+    // Se usa 'code' para identificar el producto de forma única
+    final existingIndex = state.indexWhere((i) => i.product.code == product.code);
+    final currentQuantity = existingIndex != -1 ? state[existingIndex].quantity : 0.0;
+    final newQuantity = currentQuantity + quantity;
+
+    if (product.stock < newQuantity) {
+      return existingIndex != -1
+          ? CartOperationResult.noMoreStock
+          : CartOperationResult.outOfStock;
+    }
+
+    final updatedItems = List<CartItem>.from(state);
+
+    if (existingIndex != -1) {
+      final existingItem = updatedItems[existingIndex];
+      updatedItems[existingIndex] = existingItem.copyWith(
+        quantity: newQuantity,
+      );
+    } else {
+      updatedItems.add(
+        CartItem(
+          product: product,
+          quantity: quantity,
+        ),
+      );
+    }
+
+    state = updatedItems;
     return CartOperationResult.success;
   }
 
+  /// Incrementa en 1 la cantidad del ítem en el índice indicado.
   CartOperationResult increaseQuantity(int index) {
-    final cart = state;
-    final item = cart[index];
-    if (item.quantity >= item.product.stock) {
+    if (index < 0 || index >= state.length) {
+      return CartOperationResult.invalidWeight;
+    }
+
+    final item = state[index];
+    final newQuantity = item.quantity + 1.0;
+
+    if (item.product.stock < newQuantity) {
       return CartOperationResult.noMoreStock;
     }
-    state = [
-      for (int i = 0; i < cart.length; i++)
-        if (i == index) item.copyWith(quantity: item.quantity + 1) else cart[i],
-    ];
+
+    final updatedList = List<CartItem>.from(state);
+    updatedList[index] = item.copyWith(quantity: newQuantity);
+    state = updatedList;
+
     return CartOperationResult.success;
   }
 
+  /// Decrementa en 1 la cantidad del ítem en el índice indicado o lo elimina si llega a 0.
   void decreaseQuantity(int index) {
-    final cart = state;
-    final item = cart[index];
-    if (item.quantity > 1) {
-      state = [
-        for (int i = 0; i < cart.length; i++)
-          if (i == index) item.copyWith(quantity: item.quantity - 1) else cart[i],
-      ];
+    if (index < 0 || index >= state.length) return;
+
+    final item = state[index];
+    if (item.quantity > 1.0) {
+      final updatedList = List<CartItem>.from(state);
+      updatedList[index] = item.copyWith(quantity: item.quantity - 1.0);
+      state = updatedList;
     } else {
-      state = [
-        for (int i = 0; i < cart.length; i++)
-          if (i != index) cart[i],
-      ];
+      removeItem(index);
     }
   }
 
+  /// Remueve completamente un ítem por índice
+  void removeItem(int index) {
+    final updatedList = List<CartItem>.from(state);
+    if (index >= 0 && index < updatedList.length) {
+      updatedList.removeAt(index);
+      state = updatedList;
+    }
+  }
+
+  /// Actualiza la cantidad directamente
+  void updateQuantity(int index, double quantity) {
+    if (quantity <= 0) {
+      removeItem(index);
+      return;
+    }
+
+    if (index >= 0 && index < state.length) {
+      final updatedList = List<CartItem>.from(state);
+      updatedList[index] = updatedList[index].copyWith(quantity: quantity);
+      state = updatedList;
+    }
+  }
+
+  /// Vacía el carrito por completo
   void clear() {
     state = [];
   }
+
+  /// Alias por compatibilidad
+  void clearCart() => clear();
 }
 
-final cartControllerProvider = NotifierProvider<CartController, List<CartItem>>(CartController.new);
+final cartControllerProvider =
+    StateNotifierProvider<CartController, List<CartItem>>((ref) {
+  return CartController();
+});
 
-/// Derivado: total monetario del carrito. Antes cada pantalla que lo
-/// necesitaba recalculaba a mano sumando item.subtotal (ver
-/// `_calculateTotal` original); ahora se lee directo de aquí y se
-/// recalcula solo cuando cartControllerProvider cambia.
+/// Total acumulado derivado directamente del carrito
 final cartTotalProvider = Provider<double>((ref) {
-  final cart = ref.watch(cartControllerProvider);
-  double total = 0.0;
-  for (final item in cart) {
-    total += item.subtotal;
-  }
-  return total;
+  final cartItems = ref.watch(cartControllerProvider);
+  return cartItems.fold(0.0, (sum, item) => sum + item.subtotal);
 });

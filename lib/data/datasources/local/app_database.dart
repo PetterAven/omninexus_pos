@@ -1,4 +1,3 @@
-
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
@@ -60,7 +59,13 @@ class AppDatabase {
     return await databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 3,
+        // v1.1.0: subida de 4 → 5 para convertir products.stock de
+        // INTEGER a REAL (sirve tanto para piezas como para kilos en
+        // existencia de productos a granel). Los clientes que ya tienen
+        // la app instalada pasan por _onUpgrade; las instalaciones
+        // nuevas usan createTables directamente, que ya incluye el tipo
+        // correcto.
+        version: 5,
         onCreate: createTables,
         onUpgrade: _onUpgrade,
       ),
@@ -116,6 +121,40 @@ class AppDatabase {
         )
       ''');
     }
+    if (oldVersion < 4) {
+      // v1.1.0: venta a granel. ALTER TABLE ... ADD COLUMN no soporta
+      // IF NOT EXISTS en SQLite, así que se envuelve en try/catch por si
+      // un cliente llegara a correr esta migración dos veces.
+      try {
+        await db.execute('ALTER TABLE products ADD COLUMN is_weighted INTEGER DEFAULT 0');
+      } catch (_) {}
+      try {
+        await db.execute("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'pza'");
+      } catch (_) {}
+    }
+    if (oldVersion < 5) {
+      // v1.1.0: products.stock de INTEGER a REAL (para que también sirva
+      // como kilos/litros en existencia de productos a granel). SQLite
+      // no soporta ALTER COLUMN para cambiar el tipo, así que se
+      // recrea la tabla completa preservando los datos existentes.
+      await db.execute('ALTER TABLE products RENAME TO products_old_v4');
+      await db.execute('''
+        CREATE TABLE products (
+          code TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          price REAL NOT NULL,
+          stock REAL NOT NULL DEFAULT 0,
+          is_weighted INTEGER NOT NULL DEFAULT 0,
+          unit TEXT NOT NULL DEFAULT 'pza'
+        )
+      ''');
+      await db.execute('''
+        INSERT INTO products (code, name, price, stock, is_weighted, unit)
+        SELECT code, name, price, CAST(stock AS REAL), is_weighted, unit
+        FROM products_old_v4
+      ''');
+      await db.execute('DROP TABLE products_old_v4');
+    }
   }
 
   /// Esquema de tablas estático expuesto para poder reutilizarse en los tests
@@ -125,7 +164,9 @@ class AppDatabase {
         code TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         price REAL NOT NULL,
-        stock INTEGER NOT NULL
+        stock REAL NOT NULL DEFAULT 0,
+        is_weighted INTEGER NOT NULL DEFAULT 0,
+        unit TEXT NOT NULL DEFAULT 'pza'
       )
     ''');
 

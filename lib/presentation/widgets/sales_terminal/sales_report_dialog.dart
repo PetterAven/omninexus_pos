@@ -6,11 +6,8 @@ import '../../../domain/entities/sale_detail.dart';
 import '../../providers/auth_controller.dart';
 import '../../providers/sales_controller.dart';
 import '../../providers/user_controller.dart';
+import 'sales_export_service.dart';
 
-/// Diálogo para crear una nueva cuenta de empleado (cajero/administrador).
-///
-/// Llama a userControllerProvider.addUser(), que ya trae su propia
-/// validación de autorización y su propio refresh() de la lista.
 void showCreateUserDialog(
   BuildContext context,
   WidgetRef ref, {
@@ -40,7 +37,7 @@ void showCreateUserDialog(
             ),
             const SizedBox(height: 15),
             DropdownButtonFormField<String>(
-              initialValue: selectedRole,
+              value: selectedRole,
               decoration: const InputDecoration(labelText: 'Puesto', prefixIcon: Icon(Icons.badge)),
               items: const [
                 DropdownMenuItem(value: 'Cajero', child: Text('Cajero')),
@@ -102,15 +99,6 @@ void showCreateUserDialog(
   );
 }
 
-/// Panel de control de la Terminal de Ventas: corte de caja del día y,
-/// para administradores, gestión de personal (crear/dar de baja cuentas).
-///
-/// CORREGIDO: tanto el corte de caja como la lista de personal ya no
-/// viven como variables locales del StatefulBuilder -- ambas pestañas
-/// se envuelven en su propio Consumer y leen directo de
-/// salesControllerProvider / userControllerProvider. El botón de
-/// refresh ya no hace su propio fetch+setDialogState: solo llama a
-/// refresh() de los controllers correspondientes.
 void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
   final userRole = ref.read(currentUserProvider)?.role ?? 'Cajero';
   final isAdmin = userRole == 'Administrador' || userRole == 'admin';
@@ -134,8 +122,6 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
             ),
             Row(
               children: [
-                // Botón para reintentar la sincronización con Supabase
-                // sin tener que cerrar y reabrir el panel.
                 IconButton(
                   icon: const Icon(Icons.refresh),
                   tooltip: 'Sincronizar con Supabase',
@@ -177,6 +163,7 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                       builder: (context, ref, _) {
                         final salesAsync = ref.watch(salesControllerProvider);
                         final granTotal = ref.watch(salesTotalProvider);
+                        final sales = salesAsync.value ?? [];
 
                         return Column(
                           children: [
@@ -193,7 +180,16 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                icon: const Icon(Icons.file_download, size: 18),
+                                label: const Text('Exportar corte de caja'),
+                                onPressed: sales.isEmpty ? null : () => exportSalesReport(dialogContext, sales),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
                             Expanded(
                               child: salesAsync.when(
                                 loading: () => const Center(child: CircularProgressIndicator()),
@@ -212,13 +208,8 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                                       return ExpansionTile(
                                         leading: const Icon(Icons.receipt_long, color: Colors.blueGrey),
                                         title: Text('Ticket ID: #$saleId'),
-                                        subtitle: Text(sale.date.substring(11, 19)),
+                                        subtitle: Text(sale.date.length >= 19 ? sale.date.substring(11, 19) : sale.date),
                                         trailing: Text('\$${sale.total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                        // Al desplegar el ticket se muestra el desglose de
-                                        // productos vendidos, sincronizado desde Supabase.
-                                        // Esto se queda como FutureBuilder puntual -- no hay
-                                        // necesidad de un controller para un detalle que solo
-                                        // se consulta al expandir un ticket.
                                         children: [
                                           FutureBuilder<List<SaleDetail>>(
                                             future: SalesRepository.instance.getSaleDetails(saleId),

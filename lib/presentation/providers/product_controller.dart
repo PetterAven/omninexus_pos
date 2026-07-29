@@ -57,6 +57,21 @@ class ProductController extends AsyncNotifier<List<Product>> {
     await ProductRepository.instance.deleteProduct(code);
     await refresh();
   }
+
+  /// v1.1.0: importación masiva desde Excel/CSV (import_export_dialog.dart).
+  /// Reusa insertProduct(), que ya hace upsert vía
+  /// ConflictAlgorithm.replace -- así un CSV con un código que ya existe
+  /// actualiza ese producto en vez de duplicarlo o fallar.
+  ///
+  /// A propósito hace UN solo refresh() al final en vez de uno por fila:
+  /// con un catálogo de cientos de productos, refrescar (y notificar a
+  /// toda la UI) después de cada insert sería innecesariamente lento.
+  Future<void> bulkImportProducts(List<Product> products) async {
+    for (final product in products) {
+      await ProductRepository.instance.insertProduct(product);
+    }
+    await refresh();
+  }
 }
 
 final productControllerProvider =

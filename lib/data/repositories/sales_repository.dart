@@ -37,21 +37,25 @@ class SalesRepository {
       finalSaleId = insertedSale['id'] as int;
 
       for (final item in cartItems) {
+        // Se realiza casteo .round() / .toInt() para asegurar compatibilidad con SaleDetail
         final detail = SaleDetail(
           saleId: finalSaleId,
           productCode: item.product.code,
           productName: item.product.name,
           price: item.product.price,
-          quantity: item.quantity,
+          quantity: item.quantity.round(), 
         );
 
-        await _supabase.from('sale_details').insert(detail.toInsertMap()).timeout(AppConstants.networkTimeout);
+        await _supabase
+            .from('sale_details')
+            .insert(detail.toInsertMap())
+            .timeout(AppConstants.networkTimeout);
 
         // Disparador de decremento atómico seguro contra condiciones de carrera
         try {
           await _supabase.rpc('decrement_stock', params: {
             'row_code': item.product.code,
-            'quantity_to_sub': item.quantity,
+            'quantity_to_sub': item.quantity.round(),
           }).timeout(AppConstants.networkTimeout);
         } catch (_) {}
       }
@@ -81,14 +85,14 @@ class SalesRepository {
           productCode: item.product.code,
           productName: item.product.name,
           price: item.product.price,
-          quantity: item.quantity,
+          quantity: item.quantity.round(),
         );
         await txn.insert('sale_details', detail.toInsertMap());
 
-        // Actualización directa del inventario local
+        // Actualización directa del inventario local (descuenta la cantidad entera)
         await txn.execute(
           'UPDATE products SET stock = stock - ? WHERE code = ?',
-          [item.quantity, item.product.code],
+          [item.quantity.round(), item.product.code],
         );
       }
 
@@ -98,21 +102,24 @@ class SalesRepository {
     return Sale(id: finalSaleId ?? localSaleId, total: total, date: isoDate);
   }
 
-  /// Antes 'sale_details' nunca se volvía a bajar de Supabase -- solo se
-  /// insertaba al hacer la venta. Por eso el corte de caja solo mostraba
-  /// el TOTAL de cada ticket, nunca qué productos lo componían. Igual
-  /// que getProducts()/getSales(), jalamos todos los detalles de
-  /// Supabase y los guardamos en local antes de leer.
+  /// Sincroniza el detalle de ventas desde Supabase a SQLite local.
   Future<void> _syncSaleDetails() async {
     try {
-      final cloudDetails = await _supabase.from('sale_details').select().timeout(AppConstants.networkTimeout);
+      final cloudDetails = await _supabase
+          .from('sale_details')
+          .select()
+          .timeout(AppConstants.networkTimeout);
 
       if (cloudDetails.isNotEmpty) {
         final db = await AppDatabase.instance.database;
         final batch = db.batch();
         for (final raw in cloudDetails) {
           final detail = SaleDetail.fromMap(Map<String, dynamic>.from(raw));
-          batch.insert('sale_details', detail.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+          batch.insert(
+            'sale_details',
+            detail.toMap(),
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
         }
         await batch.commit(noResult: true);
       }
@@ -121,9 +128,7 @@ class SalesRepository {
     }
   }
 
-  /// Desglose de productos de una venta específica, para mostrar en el
-  /// corte de caja/historial. Lee de local -- que ya se mantiene al día
-  /// gracias a _syncSaleDetails() llamado desde getSales().
+  /// Desglose de productos de una venta específica, para mostrar en el corte de caja.
   Future<List<SaleDetail>> getSaleDetails(int saleId) async {
     final db = await AppDatabase.instance.database;
     final rows = await db.query('sale_details', where: 'sale_id = ?', whereArgs: [saleId]);
@@ -151,7 +156,6 @@ class SalesRepository {
       debugPrint('Modo Offline: mostrando ventas guardadas en este equipo. $e');
     }
 
-    // Mantenemos el detalle de cada venta sincronizado también.
     await _syncSaleDetails();
 
     final db = await AppDatabase.instance.database;

@@ -5,9 +5,6 @@ import 'package:omninexus_pos/domain/entities/product.dart';
 import 'package:omninexus_pos/presentation/providers/cart_controller.dart';
 
 void main() {
-  // CartController es 100% lógica en memoria (sin SQLite ni Supabase),
-  // así que no necesita ningún setUpAll -- cada test arranca con un
-  // ProviderContainer nuevo y limpio.
   late ProviderContainer container;
 
   setUp(() {
@@ -15,9 +12,9 @@ void main() {
     addTearDown(container.dispose);
   });
 
-  const refresco = Product(code: 'T001', name: 'Refresco', price: 18.50, stock: 5);
-  const soloUno = Product(code: 'T002', name: 'Ítem con stock 1', price: 10.0, stock: 1);
-  const sinStock = Product(code: 'T003', name: 'Sin stock', price: 20.0, stock: 0);
+  final refresco = Product(code: 'T001', name: 'Refresco', price: 18.50, stock: 5);
+  final soloUno = Product(code: 'T002', name: 'Ítem con stock 1', price: 10.0, stock: 1);
+  final sinStock = Product(code: 'T003', name: 'Sin stock', price: 20.0, stock: 0);
 
   group('CartController.addProduct', () {
     test('agrega un producto nuevo con cantidad 1', () {
@@ -56,7 +53,7 @@ void main() {
     test('llegar al límite de stock devuelve noMoreStock y no incrementa más', () {
       final notifier = container.read(cartControllerProvider.notifier);
 
-      notifier.addProduct(soloUno); // queda en cantidad 1, que ya es el stock máximo
+      notifier.addProduct(soloUno);
       final result = notifier.addProduct(soloUno);
 
       expect(result, CartOperationResult.noMoreStock);
@@ -66,7 +63,7 @@ void main() {
     });
   });
 
-  group('CartController.increaseQuantity / decreaseQuantity', () {
+  group('CartController.increaseQuantity / decreaseQuantity / removeItem', () {
     test('increaseQuantity sube la cantidad si hay stock disponible', () {
       final notifier = container.read(cartControllerProvider.notifier);
       notifier.addProduct(refresco);
@@ -90,7 +87,7 @@ void main() {
     test('decreaseQuantity resta uno si la cantidad es mayor a 1', () {
       final notifier = container.read(cartControllerProvider.notifier);
       notifier.addProduct(refresco);
-      notifier.addProduct(refresco); // cantidad 2
+      notifier.addProduct(refresco);
 
       notifier.decreaseQuantity(0);
 
@@ -101,9 +98,19 @@ void main() {
 
     test('decreaseQuantity elimina el ítem si la cantidad era 1', () {
       final notifier = container.read(cartControllerProvider.notifier);
-      notifier.addProduct(refresco); // cantidad 1
+      notifier.addProduct(refresco);
 
       notifier.decreaseQuantity(0);
+
+      expect(container.read(cartControllerProvider), isEmpty);
+    });
+
+    test('removeItem elimina el ítem sin importar la cantidad', () {
+      final notifier = container.read(cartControllerProvider.notifier);
+      notifier.addProduct(refresco);
+      notifier.addProduct(refresco); // cantidad 2
+
+      notifier.removeItem(0);
 
       expect(container.read(cartControllerProvider), isEmpty);
     });
@@ -122,8 +129,8 @@ void main() {
   group('cartTotalProvider', () {
     test('suma los subtotales de todos los ítems del carrito', () {
       final notifier = container.read(cartControllerProvider.notifier);
-      notifier.addProduct(refresco); // 18.50 x1
-      notifier.addProduct(soloUno); // 10.0 x1
+      notifier.addProduct(refresco);
+      notifier.addProduct(soloUno);
 
       final total = container.read(cartTotalProvider);
 
@@ -140,7 +147,7 @@ void main() {
   });
 
   test('CartItem.subtotal se calcula como price * quantity', () {
-    const item = CartItem(product: refresco, quantity: 3);
+    final item = CartItem(product: refresco, quantity: 3);
     expect(item.subtotal, closeTo(55.50, 0.001));
   });
 }

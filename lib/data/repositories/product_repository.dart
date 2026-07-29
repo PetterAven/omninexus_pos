@@ -6,14 +6,6 @@ import '../../core/sync_status.dart';
 import '../../domain/entities/product.dart';
 import '../datasources/local/app_database.dart';
 
-/// Repositorio de productos: toda la lógica que antes vivía mezclada
-/// dentro de DatabaseHelper (getProducts, insertProduct, updateProduct,
-/// deleteProduct, searchProducts) ahora vive aquí, aislada del resto del
-/// código de ventas/usuarios.
-///
-/// Tipado con la entidad [Product] en vez de Map<String, dynamic>: así
-/// los errores de nombre de campo o de tipo se detectan en tiempo de
-/// compilación en vez de explotar en producción con un cast fallido.
 class ProductRepository {
   static final ProductRepository instance = ProductRepository._init();
   ProductRepository._init();
@@ -22,12 +14,19 @@ class ProductRepository {
 
   Future<List<Product>> getProducts() async {
     try {
-      final cloudProducts = await _supabase.from('products').select().timeout(AppConstants.networkTimeout);
+      final cloudProducts = await _supabase
+          .from('products')
+          .select()
+          .timeout(AppConstants.networkTimeout);
 
       if (cloudProducts.isNotEmpty) {
         final db = await AppDatabase.instance.database;
         for (var prod in cloudProducts) {
-          await db.insert('products', Product.fromMap(prod).toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+          await db.insert(
+            'products',
+            Product.fromMap(prod).toMap(),
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
         }
       }
       SyncStatus.lastSyncOk = true;
@@ -43,7 +42,10 @@ class ProductRepository {
 
   Future<int> insertProduct(Product product) async {
     try {
-      await _supabase.from('products').insert(product.toMap()).timeout(AppConstants.networkTimeout);
+      await _supabase
+          .from('products')
+          .insert(product.toMap())
+          .timeout(AppConstants.networkTimeout);
       SyncStatus.lastSyncOk = true;
     } catch (e) {
       SyncStatus.lastSyncOk = false;
@@ -51,14 +53,28 @@ class ProductRepository {
     }
 
     final db = await AppDatabase.instance.database;
-    return await db.insert('products', product.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    return await db.insert(
+      'products',
+      product.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<int> updateProduct(Product product) async {
+    // 1. Guardar primero en SQLite Local para garantizar persistencia inmediata
+    final db = await AppDatabase.instance.database;
+    final localRows = await db.update(
+      'products',
+      product.toMap(),
+      where: 'code = ?',
+      whereArgs: [product.code],
+    );
+
+    // 2. Intentar sincronizar con Supabase Cloud
     try {
       await _supabase
           .from('products')
-          .update({'name': product.name, 'price': product.price, 'stock': product.stock})
+          .update(product.toMap()) // Mapeo consistente
           .eq('code', product.code)
           .timeout(AppConstants.networkTimeout);
       SyncStatus.lastSyncOk = true;
@@ -67,21 +83,26 @@ class ProductRepository {
       debugPrint("Offline: Sincronización diferida para actualización. $e");
     }
 
-    final db = await AppDatabase.instance.database;
-    return await db.update('products', product.toMap(), where: 'code = ?', whereArgs: [product.code]);
+    return localRows;
   }
 
   Future<int> deleteProduct(String code) async {
+    final db = await AppDatabase.instance.database;
+    final result = await db.delete('products', where: 'code = ?', whereArgs: [code]);
+
     try {
-      await _supabase.from('products').delete().eq('code', code).timeout(AppConstants.networkTimeout);
+      await _supabase
+          .from('products')
+          .delete()
+          .eq('code', code)
+          .timeout(AppConstants.networkTimeout);
       SyncStatus.lastSyncOk = true;
     } catch (e) {
       SyncStatus.lastSyncOk = false;
       debugPrint("Offline: Sincronización diferida para eliminación. $e");
     }
 
-    final db = await AppDatabase.instance.database;
-    return await db.delete('products', where: 'code = ?', whereArgs: [code]);
+    return result;
   }
 
   Future<List<Product>> searchProducts(String query) async {
@@ -93,5 +114,29 @@ class ProductRepository {
       whereArgs: ['%$query%', '%$query%'],
     );
     return rows.map(Product.fromMap).toList();
+  }
+
+  Future<void> bulkUpsertProducts(List<Product> products) async {
+    try {
+      await _supabase
+          .from('products')
+          .upsert(products.map((p) => p.toMap()).toList())
+          .timeout(AppConstants.networkTimeout);
+      SyncStatus.lastSyncOk = true;
+    } catch (e) {
+      SyncStatus.lastSyncOk = false;
+      debugPrint("Offline: Sincronización diferida para importación masiva. $e");
+    }
+
+    final db = await AppDatabase.instance.database;
+    final batch = db.batch();
+    for (final product in products) {
+      batch.insert(
+        'products',
+        product.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
   }
 }
