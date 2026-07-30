@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
@@ -15,7 +16,7 @@ void showImportExportDialog(
 ) {
   showDialog(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (dialogContext) => AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Row(
         children: [
@@ -36,7 +37,7 @@ void showImportExportDialog(
             title: const Text('Exportar Inventario', style: TextStyle(fontWeight: FontWeight.bold)),
             subtitle: const Text('Guardar catálogo actual en formato Excel (.xlsx)'),
             onTap: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               await _handleExport(context, currentProducts);
             },
           ),
@@ -50,7 +51,7 @@ void showImportExportDialog(
             title: const Text('Importar Productos', style: TextStyle(fontWeight: FontWeight.bold)),
             subtitle: const Text('Cargar catálogo masivo desde un archivo .xlsx o .csv'),
             onTap: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               await _handleImport(context, ref);
             },
           ),
@@ -58,7 +59,7 @@ void showImportExportDialog(
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(dialogContext),
           child: const Text('Cerrar'),
         ),
       ],
@@ -69,19 +70,31 @@ void showImportExportDialog(
 /// Selector de archivos e importador masivo a la base de datos
 Future<void> _handleImport(BuildContext context, WidgetRef ref) async {
   try {
-    FilePickerResult? result = await FilePicker.pickFiles(
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'csv'],
+      withData: true, // Requerido para leer bytes directamente en móviles
     );
 
-    if (result == null || result.files.single.path == null) return;
+    if (result == null || result.files.isEmpty) return;
 
-    final filePath = result.files.single.path!;
-    final file = File(filePath);
+    final pickedFile = result.files.first;
     List<Product> newProducts = [];
 
-    if (filePath.endsWith('.csv')) {
-      final input = await file.readAsString();
+    // Obtener bytes directamente o leer desde el path si existe
+    Uint8List? bytes = pickedFile.bytes;
+    if (bytes == null && pickedFile.path != null) {
+      bytes = await File(pickedFile.path!).readAsBytes();
+    }
+
+    if (bytes == null) {
+      throw Exception('No se pudieron obtener los datos del archivo.');
+    }
+
+    final extension = pickedFile.extension?.toLowerCase() ?? '';
+
+    if (extension == 'csv') {
+      final input = String.fromCharCodes(bytes);
       List<List<dynamic>> rows = const CsvToListConverter().convert(input);
 
       int startIndex = (rows.isNotEmpty && double.tryParse(rows[0][2].toString()) == null) ? 1 : 0;
@@ -99,15 +112,13 @@ Future<void> _handleImport(BuildContext context, WidgetRef ref) async {
             code: row[0].toString().trim(),
             name: row[1].toString().trim(),
             price: double.tryParse(row[2].toString()) ?? 0.0,
-            // v1.1.0: stock es double (piezas o kilos), ya no int.
             stock: double.tryParse(row[3].toString()) ?? 0.0,
             isWeighted: isWeightedVal,
             unit: unitVal,
           ));
         }
       }
-    } else if (filePath.endsWith('.xlsx')) {
-      var bytes = file.readAsBytesSync();
+    } else if (extension == 'xlsx') {
       var excel = Excel.decodeBytes(bytes);
 
       for (var table in excel.tables.keys) {
@@ -116,7 +127,7 @@ Future<void> _handleImport(BuildContext context, WidgetRef ref) async {
 
         for (var i = 1; i < sheet.maxRows; i++) {
           var row = sheet.rows[i];
-          if (row.length >= 4 && row[0] != null && row[1] != null) {
+          if (row.length >= 4 && row[0]?.value != null && row[1]?.value != null) {
             final isWeightedVal = row.length >= 5 &&
                 (row[4]?.value.toString() == '1' ||
                     row[4]?.value.toString().toLowerCase() == 'true' ||
@@ -129,7 +140,6 @@ Future<void> _handleImport(BuildContext context, WidgetRef ref) async {
               code: row[0]!.value.toString().trim(),
               name: row[1]!.value.toString().trim(),
               price: double.tryParse(row[2]?.value.toString() ?? '0') ?? 0.0,
-              // v1.1.0: stock es double (piezas o kilos), ya no int.
               stock: double.tryParse(row[3]?.value.toString() ?? '0') ?? 0.0,
               isWeighted: isWeightedVal,
               unit: unitVal,
@@ -168,18 +178,9 @@ Future<void> _handleImport(BuildContext context, WidgetRef ref) async {
   }
 }
 
-/// Genera un .xlsx real
+/// Genera un .xlsx real con soporte multiplataforma
 Future<void> _handleExport(BuildContext context, List<Product> products) async {
   try {
-    String? outputFile = await FilePicker.saveFile(
-      dialogTitle: 'Guardar archivo de inventario',
-      fileName: 'Inventario_${DateTime.now().millisecondsSinceEpoch}.xlsx',
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-    );
-
-    if (outputFile == null) return;
-
     final excelFile = Excel.createExcel();
     final sheet = excelFile['Inventario'];
 
@@ -201,11 +202,9 @@ Future<void> _handleExport(BuildContext context, List<Product> products) async {
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue(p.code);
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue(p.name);
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = DoubleCellValue(p.price);
-      // v1.1.0: stock ahora es double (antes IntCellValue).
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = DoubleCellValue(p.stock);
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = TextCellValue(p.isWeighted ? 'Sí' : 'No');
-      // p.unit ya no es nullable (default 'pza'), se quitó el '?? '' innecesario.
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row)).value = TextCellValue(p.unit);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row)).value = TextCellValue(p.unit ?? '');
     }
 
     sheet.setColumnWidth(0, 18);
@@ -220,14 +219,36 @@ Future<void> _handleExport(BuildContext context, List<Product> products) async {
     }
     excelFile.setDefaultSheet('Inventario');
 
-    final bytes = excelFile.encode();
-    if (bytes == null) throw Exception('No se pudo generar el archivo Excel.');
-    await File(outputFile).writeAsBytes(bytes);
+    final List<int>? encodedBytes = excelFile.encode();
+    if (encodedBytes == null) throw Exception('No se pudo generar el archivo Excel.');
+    final Uint8List bytes = Uint8List.fromList(encodedBytes);
+
+    final fileName = 'Inventario_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+
+    if (Platform.isAndroid || Platform.isIOS) {
+      final outputPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Guardar archivo de inventario',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+        bytes: bytes,
+      );
+      if (outputPath == null) return;
+    } else {
+      final outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Guardar archivo de inventario',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+      );
+      if (outputFile == null) return;
+      await File(outputFile).writeAsBytes(bytes);
+    }
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('✅ Inventario guardado en: $outputFile'),
+      const SnackBar(
+        content: Text('✅ Inventario exportado correctamente.'),
         backgroundColor: Colors.green,
       ),
     );

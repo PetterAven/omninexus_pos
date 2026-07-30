@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' as excel;
@@ -36,14 +37,6 @@ Future<void> exportSalesReport(BuildContext context, List<Sale> sales) async {
       }
     }
 
-    String? outputFile = await FilePicker.saveFile(
-      dialogTitle: 'Guardar corte de caja',
-      fileName: 'CorteDeCaja_${DateTime.now().millisecondsSinceEpoch}.xlsx',
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-    );
-    if (outputFile == null) return;
-
     final excelFile = excel.Excel.createExcel();
 
     // Estilo de Encabezado: Azul Marino (#1F4E78) con texto blanco centrado
@@ -79,7 +72,7 @@ Future<void> exportSalesReport(BuildContext context, List<Sale> sales) async {
     var row = 1;
     double granTotal = 0;
     final sortedSummary = summary.values.toList()..sort((a, b) => b.quantity.compareTo(a.quantity));
-    
+
     for (final item in sortedSummary) {
       final cellName = resumen.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row));
       cellName.value = excel.TextCellValue(item.name);
@@ -100,7 +93,7 @@ Future<void> exportSalesReport(BuildContext context, List<Sale> sales) async {
     // Fila del Gran Total resaltada
     final totalHeaderStyle = excel.CellStyle(
       bold: true,
-      backgroundColorHex: excel.ExcelColor.fromHexString('#E2EFDA'), // Verde claro elegante
+      backgroundColorHex: excel.ExcelColor.fromHexString('#E2EFDA'),
       fontColorHex: excel.ExcelColor.fromHexString('#276A3C'),
       horizontalAlign: excel.HorizontalAlign.Left,
     );
@@ -135,7 +128,7 @@ Future<void> exportSalesReport(BuildContext context, List<Sale> sales) async {
     for (var i = 0; i < ticketRows.length; i++) {
       final t = ticketRows[i];
       final r = i + 1;
-      
+
       final c0 = detalle.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r));
       c0.value = excel.TextCellValue('#${t.ticketId}');
       c0.cellStyle = cellStyleData;
@@ -173,13 +166,35 @@ Future<void> exportSalesReport(BuildContext context, List<Sale> sales) async {
     }
     excelFile.setDefaultSheet('Resumen');
 
-    final bytes = excelFile.encode();
-    if (bytes == null) throw Exception('No se pudo generar el archivo Excel.');
-    await File(outputFile).writeAsBytes(bytes);
+    final List<int>? encodedBytes = excelFile.encode();
+    if (encodedBytes == null) throw Exception('No se pudo generar el archivo Excel.');
+    final Uint8List bytes = Uint8List.fromList(encodedBytes);
+
+    final fileName = 'CorteDeCaja_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+
+    if (Platform.isAndroid || Platform.isIOS) {
+      final outputPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Guardar corte de caja',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+        bytes: bytes,
+      );
+      if (outputPath == null) return;
+    } else {
+      final outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Guardar corte de caja',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+      );
+      if (outputFile == null) return;
+      await File(outputFile).writeAsBytes(bytes);
+    }
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('✅ Corte de caja guardado en: $outputFile'), backgroundColor: Colors.green),
+      const SnackBar(content: Text('✅ Corte de caja exportado correctamente.'), backgroundColor: Colors.green),
     );
   } catch (e) {
     if (!context.mounted) return;
