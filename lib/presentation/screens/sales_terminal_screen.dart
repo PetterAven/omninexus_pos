@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../data/repositories/product_repository.dart';
 import '../../data/repositories/sync_repository.dart';
+import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/product.dart';
 import '../providers/auth_controller.dart';
 import '../providers/cart_controller.dart';
 import '../providers/checkout_controller.dart';
-import 'inventory_screen.dart';
-import 'barcode_scanner_screen.dart';
-import 'login_screen.dart';
-import '../widgets/sales_terminal/payment_panel.dart';
-import '../widgets/sales_terminal/sync_code_dialog.dart';
 import '../widgets/sales_terminal/cart_and_search_section.dart';
-import '../widgets/sales_terminal/ticket_receipt_dialog.dart';
+import '../widgets/sales_terminal/payment_panel.dart';
 import '../widgets/sales_terminal/sales_report_dialog.dart';
+import '../widgets/sales_terminal/sync_code_dialog.dart';
+import '../widgets/sales_terminal/ticket_receipt_dialog.dart';
 import '../widgets/telegram_link_dialog.dart';
+import 'barcode_scanner_screen.dart';
+import 'inventory_screen.dart';
+import 'login_screen.dart';
 
 class SalesTerminalScreen extends ConsumerStatefulWidget {
   const SalesTerminalScreen({super.key});
@@ -25,21 +27,18 @@ class SalesTerminalScreen extends ConsumerStatefulWidget {
 }
 
 class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
-  final SearchController _searchController = SearchController();
+  final TextEditingController _searchController = TextEditingController();
   final TextEditingController _cashController = TextEditingController();
 
-  // ================= VARIABLES CLIENTE VINCULADO =================
   String? _linkedChatId;
   String? _linkedUsername;
+
+  bool _isApplyingRemoteCart = false;
 
   @override
   void initState() {
     super.initState();
-    SyncRepository.instance.listenToRemoteCart((scannedMap) {
-      if (!mounted) return;
-      final product = Product.fromMap(scannedMap);
-      _handleAddProduct(product);
-    });
+    SyncRepository.instance.listenToRemoteCart(_applyRemoteCartSnapshot);
   }
 
   @override
@@ -50,21 +49,31 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     super.dispose();
   }
 
-  // ================= CÓDIGO DE SINCRONIZACIÓN PC <-> TELÉFONO =================
   void _showSyncCodeDialog() {
     showSyncCodeDialog(
       context,
       onCodeUpdated: () {
-        SyncRepository.instance.listenToRemoteCart((scannedMap) {
-          if (!mounted) return;
-          final product = Product.fromMap(scannedMap);
-          _handleAddProduct(product);
-        });
+        SyncRepository.instance.listenToRemoteCart(_applyRemoteCartSnapshot);
       },
     );
   }
 
-  // Manejo de resultado de agregación al carrito
+  void _applyRemoteCartSnapshot(List<Map<String, dynamic>> rawItems) {
+    if (!mounted) return;
+
+    _isApplyingRemoteCart = true;
+    final items = rawItems.map((map) {
+      final product = Product.fromMap(map);
+      final quantity =
+          double.tryParse(map['quantity']?.toString() ?? '1') ?? 1.0;
+      return CartItem(product: product, quantity: quantity);
+    }).toList();
+
+    ref.read(cartControllerProvider.notifier).replaceAll(items);
+
+    Future.microtask(() => _isApplyingRemoteCart = false);
+  }
+
   void _handleAddProduct(Product product) {
     final result =
         ref.read(cartControllerProvider.notifier).addProduct(product);
@@ -72,8 +81,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
       case CartOperationResult.outOfStock:
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Este producto no tiene stock disponible.'),
-          ),
+              content: Text('Este producto no tiene stock disponible.')),
         );
         break;
       case CartOperationResult.noMoreStock:
@@ -84,17 +92,14 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
       case CartOperationResult.invalidWeight:
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('El peso o cantidad ingresada no es válida.'),
-          ),
+              content: Text('El peso o cantidad ingresada no es válida.')),
         );
         break;
       case CartOperationResult.notApplicableForWeighted:
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Este producto se vende por peso. Ajusta la cantidad desde el carrito.',
-            ),
-          ),
+              content: Text(
+                  'Este producto se vende por peso. Ajusta la cantidad desde el carrito.')),
         );
         break;
       case CartOperationResult.success:
@@ -118,13 +123,11 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
           TextButton(
             onPressed: () {
               ref.read(cartControllerProvider.notifier).clear();
-              if (mounted) {
-                setState(() {
-                  _cashController.clear();
-                  _linkedChatId = null;
-                  _linkedUsername = null;
-                });
-              }
+              setState(() {
+                _cashController.clear();
+                _linkedChatId = null;
+                _linkedUsername = null;
+              });
               ref.read(checkoutControllerProvider.notifier).reset();
               Navigator.pop(context);
             },
@@ -144,12 +147,12 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     );
 
     if (clienteVinculado != null) {
-      if (!mounted) return;
       setState(() {
         _linkedChatId = clienteVinculado['chat_id']?.toString();
         _linkedUsername = clienteVinculado['username'];
       });
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -161,15 +164,13 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     }
   }
 
-  // ================= CIERRE DE SESIÓN =================
   void _confirmLogout() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('¿Cerrar sesión?'),
         content: const Text(
-          'Se cerrará tu sesión y se descartará el carrito actual si tiene productos.',
-        ),
+            'Se cerrará tu sesión y se descartará el carrito actual si tiene productos.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -180,10 +181,8 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
               Navigator.pop(context);
               _logout();
             },
-            child: const Text(
-              'Cerrar sesión',
-              style: TextStyle(color: Colors.red),
-            ),
+            child:
+                const Text('Cerrar sesión', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -201,16 +200,13 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     );
   }
 
-  // ================= REACCIÓN AL RESULTADO DEL COBRO =================
   void _onCheckoutSuccess(CheckoutResult result) {
     ref.read(cartControllerProvider.notifier).clear();
-    if (mounted) {
-      setState(() {
-        _cashController.clear();
-        _linkedChatId = null;
-        _linkedUsername = null;
-      });
-    }
+    setState(() {
+      _cashController.clear();
+      _linkedChatId = null;
+      _linkedUsername = null;
+    });
 
     if (result.telegramWarning != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -233,7 +229,6 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     );
   }
 
-  // ================= BÚSQUEDA + ESCÁNER DE CÓDIGO DE BARRAS =================
   Future<void> _scanBarcode() async {
     final code = await Navigator.push<String>(
       context,
@@ -246,23 +241,16 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     if (results.isNotEmpty) {
       final product = results.first;
       _handleAddProduct(product);
-      SyncRepository.instance.sendProductToRemoteCart(product.toMap());
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'No se encontró ningún producto con el código "$code".',
-          ),
+          content: Text('No se encontró ningún producto con el código "$code".'),
         ),
       );
     }
   }
 
-  // ================= SECCIÓN: BUSCADOR + CARRITO =================
-  Widget _buildSearchAndCart(
-    BuildContext context, {
-    required bool expandCart,
-  }) {
+  Widget _buildSearchAndCart(BuildContext context, {required bool expandCart}) {
     return CartAndSearchSection(
       expandCart: expandCart,
       searchController: _searchController,
@@ -270,7 +258,6 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
     );
   }
 
-  // ================= SECCIÓN: PANEL DE COBRO =================
   Widget _buildPaymentPanel(BuildContext context, {required bool isWide}) {
     return PaymentPanel(
       isWide: isWide,
@@ -295,6 +282,12 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
           controller.reset();
         }
       }
+    });
+
+    ref.listen<List<CartItem>>(cartControllerProvider, (previous, next) {
+      if (_isApplyingRemoteCart) return;
+      SyncRepository.instance
+          .sendCartSnapshot(next.map((item) => item.toMap()).toList());
     });
 
     return Scaffold(
@@ -345,13 +338,16 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                     onPressed: _abrirVinculacionTelegram,
                   ),
                   const SizedBox(width: 6),
+
+                  // Botón Panel de Control: Abre directo el diálogo con pestañas (Imagen 2)
                   _AppBarPillButton(
-                    icon: Icons.analytics_outlined,
-                    label: 'Corte',
+                    icon: Icons.dashboard_outlined,
+                    label: 'Panel de Control',
                     showLabel: !isNarrow,
                     onPressed: () => showSalesReportDialog(context, ref),
                   ),
                   const SizedBox(width: 6),
+
                   _AppBarPillButton(
                     icon: Icons.inventory_2_outlined,
                     label: 'Inventario',
@@ -360,9 +356,8 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => InventoryScreen(
-                            userRole: userRole ?? 'Cajero',
-                          ),
+                          builder: (_) =>
+                              InventoryScreen(userRole: userRole ?? 'Cajero'),
                         ),
                       );
                     },
@@ -434,11 +429,11 @@ class _AppBarPillButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color resolvedIconColor = iconColor ?? Colors.white;
     final Color background = highlighted
-        ? Colors.white.withValues(alpha: 0.16)
-        : Colors.white.withValues(alpha: 0.06);
+        ? Colors.white.withOpacity(0.16)
+        : Colors.white.withOpacity(0.06);
     final Color border = highlighted
-        ? Colors.blue.shade300.withValues(alpha: 0.6)
-        : Colors.white.withValues(alpha: 0.14);
+        ? Colors.blue.shade300.withOpacity(0.6)
+        : Colors.white.withOpacity(0.14);
 
     return Material(
       color: background,
@@ -466,9 +461,8 @@ class _AppBarPillButton extends StatelessWidget {
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 12.5,
-                    fontWeight: highlighted
-                        ? FontWeight.bold
-                        : FontWeight.w500,
+                    fontWeight:
+                        highlighted ? FontWeight.bold : FontWeight.w500,
                   ),
                 ),
               ],
