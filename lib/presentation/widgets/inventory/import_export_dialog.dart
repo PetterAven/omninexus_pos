@@ -132,9 +132,9 @@ Future<void> _handleImport(BuildContext context, WidgetRef ref) async {
                 (row[4]?.value.toString() == '1' ||
                     row[4]?.value.toString().toLowerCase() == 'true' ||
                     row[4]?.value.toString() == 'Sí');
-            final unitVal = (row.length >= 6 && (row[5]?.value?.toString().trim().isNotEmpty ?? false))
-                ? row[5]!.value.toString().trim()
-                : 'pza';
+            
+            final rawUnit = row.length >= 6 ? row[5]?.value?.toString().trim() : null;
+            final unitVal = (rawUnit != null && rawUnit.isNotEmpty) ? rawUnit : 'pza';
 
             newProducts.add(Product(
               code: row[0]!.value.toString().trim(),
@@ -204,7 +204,7 @@ Future<void> _handleExport(BuildContext context, List<Product> products) async {
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = DoubleCellValue(p.price);
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = DoubleCellValue(p.stock);
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = TextCellValue(p.isWeighted ? 'Sí' : 'No');
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row)).value = TextCellValue(p.unit ?? '');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row)).value = TextCellValue(p.unit);
     }
 
     sheet.setColumnWidth(0, 18);
