@@ -9,7 +9,103 @@ import '../../providers/sales_controller.dart';
 import '../../providers/user_controller.dart';
 import 'sales_export_service.dart';
 
-// --- 1. DIÁLOGO PARA CREAR USUARIOS ---
+/// Enum para definir qué pestaña se debe abrir por defecto
+enum SalesReportTab {
+  corte,
+  users,
+}
+
+// ============================================================================
+// 1. MENÚ PRINCIPAL DEL PANEL DE CONTROL (MODAL DE 3 OPCIONES)
+// ============================================================================
+
+/// Función para invocar el menú desplegable del Panel de Control.
+void showControlPanelMenu(BuildContext context, WidgetRef ref) {
+  final userRole = ref.read(currentUserProvider)?.role ?? 'Cajero';
+  final isAdmin = userRole == 'Administrador' || userRole == 'admin';
+
+  showDialog(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Row(
+        children: [
+          Icon(Icons.dashboard_customize_outlined, color: Color(0xFF232D37)),
+          SizedBox(width: 10),
+          Text(
+            'Panel de Control',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 1. CORTE DE CAJA
+          ListTile(
+            leading: const Icon(Icons.point_of_sale, color: Colors.green),
+            title: const Text('Corte de caja'),
+            onTap: () {
+              Navigator.pop(dialogContext);
+              showSalesReportDialog(
+                context,
+                ref,
+                initialTab: SalesReportTab.corte,
+              );
+            },
+          ),
+          const Divider(height: 1),
+
+          // 2. REPORTES (Exportación rápida)
+          ListTile(
+            leading: const Icon(Icons.bar_chart, color: Colors.blue),
+            title: const Text('Reportes'),
+            onTap: () async {
+              Navigator.pop(dialogContext);
+              final sales = ref.read(salesControllerProvider).value ?? [];
+              if (sales.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('No hay ventas registradas hoy para exportar.'),
+                  ),
+                );
+              } else {
+                await exportSalesReport(context, sales);
+              }
+            },
+          ),
+
+          // 3. ADMINISTRAR USUARIOS
+          if (isAdmin) ...[
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.people_alt, color: Colors.orange),
+              title: const Text('Administrar usuarios'),
+              onTap: () {
+                Navigator.pop(dialogContext);
+                showSalesReportDialog(
+                  context,
+                  ref,
+                  initialTab: SalesReportTab.users,
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cerrar'),
+        ),
+      ],
+    ),
+  );
+}
+
+// ============================================================================
+// 2. DIÁLOGO PARA CREAR USUARIOS
+// ============================================================================
 
 class CreateUserDialog extends ConsumerStatefulWidget {
   final String currentOperatorRole;
@@ -199,7 +295,9 @@ Future<void> showCreateUserDialog(
   }
 }
 
-// --- 2. ELEMENTO DESPLEGABLE DE VENTAS (DESGLOSE) ---
+// ============================================================================
+// 3. ELEMENTO DESPLEGABLE DE VENTAS (DESGLOSE DE TICKET)
+// ============================================================================
 
 class SaleTileItem extends StatefulWidget {
   final dynamic sale;
@@ -297,9 +395,15 @@ class _SaleTileItemState extends State<SaleTileItem> {
   }
 }
 
-// --- 3. PANEL DE CONTROL Y CORTE DE CAJA ---
+// ============================================================================
+// 4. PANEL CON PESTAÑAS (CORTE DE CAJA Y GESTIÓN DE PERSONAL)
+// ============================================================================
 
-void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
+void showSalesReportDialog(
+  BuildContext context,
+  WidgetRef ref, {
+  SalesReportTab initialTab = SalesReportTab.corte,
+}) async {
   final userRole = ref.read(currentUserProvider)?.role ?? 'Cajero';
   final isAdmin = userRole == 'Administrador' || userRole == 'admin';
 
@@ -307,109 +411,225 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
 
   showDialog(
     context: context,
-    builder: (dialogContext) => DefaultTabController(
-      length: isAdmin ? 2 : 1,
-      child: AlertDialog(
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.analytics, color: Color(0xFF232D37)),
-                SizedBox(width: 10),
-                Text('Panel de Control', style: TextStyle(fontWeight: FontWeight.bold)),
-              ],
+    builder: (dialogContext) => _ControlPanelDialog(
+      isAdmin: isAdmin,
+      userRole: userRole,
+      initialTab: initialTab,
+    ),
+  );
+}
+
+class _ControlPanelDialog extends ConsumerStatefulWidget {
+  final bool isAdmin;
+  final String userRole;
+  final SalesReportTab initialTab;
+
+  const _ControlPanelDialog({
+    required this.isAdmin,
+    required this.userRole,
+    required this.initialTab,
+  });
+
+  @override
+  ConsumerState<_ControlPanelDialog> createState() =>
+      _ControlPanelDialogState();
+}
+
+class _ControlPanelDialogState extends ConsumerState<_ControlPanelDialog> {
+  // 0 = Corte de Caja, 1 = Gestión de Personal
+  late int _selectedTab;
+
+  @override
+  void initState() {
+    super.initState();
+    // Establece la pestaña inicial según el parámetro enviado
+    _selectedTab = (widget.initialTab == SalesReportTab.users && widget.isAdmin) ? 1 : 0;
+  }
+
+  Widget _buildSectionSwitcher() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEEF1F6),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _sectionButton(
+              index: 0,
+              icon: Icons.point_of_sale,
+              label: 'Corte de Caja',
             ),
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  tooltip: 'Sincronizar',
-                  onPressed: () async {
-                    await ref.read(salesControllerProvider.notifier).refresh();
-                    if (isAdmin) {
-                      await ref.read(userControllerProvider.notifier).refresh();
-                    }
-                  },
+          ),
+          if (widget.isAdmin)
+            Expanded(
+              child: _sectionButton(
+                index: 1,
+                icon: Icons.groups,
+                label: 'Gestión de Personal',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionButton({
+    required int index,
+    required IconData icon,
+    required String label,
+  }) {
+    final selected = _selectedTab == index;
+    return GestureDetector(
+      onTap: () {
+        if (_selectedTab != index) setState(() => _selectedTab = index);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF232D37) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : const [],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: selected ? Colors.white : Colors.grey[700],
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: selected ? Colors.white : Colors.grey[700],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(dialogContext),
-                ),
-              ],
+              ),
             ),
           ],
         ),
-        content: SizedBox(
-          width: 450,
-          height: 400,
-          child: Column(
-            children: [
-              TabBar(
-                labelColor: const Color(0xFF232D37),
-                indicatorColor: const Color(0xFF232D37),
-                tabs: [
-                  const Tab(text: 'Corte de Caja'),
-                  if (isAdmin) const Tab(text: 'Gestión de Personal'),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    Consumer(
-                      builder: (context, ref, _) {
-                        final salesAsync = ref.watch(salesControllerProvider);
-                        final granTotal = ref.watch(salesTotalProvider);
-                        final sales = salesAsync.value ?? [];
+      ),
+    );
+  }
 
-                        return Column(
-                          children: [
-                            Card(
-                              color: Colors.green[50],
-                              child: Padding(
-                                padding: const EdgeInsets.all(12.0),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text('VENTAS ACUMULADAS:', style: TextStyle(fontWeight: FontWeight.bold)),
-                                    Text(
-                                      '\$${granTotal.toStringAsFixed(2)}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green),
-                                    ),
-                                  ],
+  @override
+  Widget build(BuildContext context) {
+    final isAdmin = widget.isAdmin;
+
+    return AlertDialog(
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.analytics, color: Color(0xFF232D37)),
+              SizedBox(width: 10),
+              Text('Panel de Control', style: TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Sincronizar',
+                onPressed: () async {
+                  await ref.read(salesControllerProvider.notifier).refresh();
+                  if (isAdmin) {
+                    await ref.read(userControllerProvider.notifier).refresh();
+                  }
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 450,
+        height: 400,
+        child: Column(
+          children: [
+            if (isAdmin) _buildSectionSwitcher(),
+            if (isAdmin) const SizedBox(height: 14),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                child: (!isAdmin || _selectedTab == 0)
+                    ? Consumer(
+                        key: const ValueKey('corte_de_caja'),
+                        builder: (context, ref, _) {
+                          final salesAsync = ref.watch(salesControllerProvider);
+                          final granTotal = ref.watch(salesTotalProvider);
+                          final sales = salesAsync.value ?? [];
+
+                          return Column(
+                            children: [
+                              Card(
+                                color: Colors.green[50],
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text('VENTAS ACUMULADAS:', style: TextStyle(fontWeight: FontWeight.bold)),
+                                      Text(
+                                        '\$${granTotal.toStringAsFixed(2)}',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton.icon(
-                                icon: const Icon(Icons.file_download, size: 18),
-                                label: const Text('Exportar corte de caja'),
-                                onPressed: sales.isEmpty ? null : () => exportSalesReport(dialogContext, sales),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  icon: const Icon(Icons.file_download, size: 18),
+                                  label: const Text('Exportar corte de caja'),
+                                  onPressed: sales.isEmpty ? null : () => exportSalesReport(context, sales),
+                                ),
                               ),
-                            ),
-                            Expanded(
-                              child: salesAsync.when(
-                                loading: () => const Center(child: CircularProgressIndicator()),
-                                error: (err, _) => Center(child: Text('Error: $err')),
-                                data: (sales) {
-                                  if (sales.isEmpty) {
-                                    return const Center(child: Text('Sin movimientos hoy.'));
-                                  }
-                                  return ListView.builder(
-                                    itemCount: sales.length,
-                                    itemBuilder: (context, index) => SaleTileItem(sale: sales[index]),
-                                  );
-                                },
+                              Expanded(
+                                child: salesAsync.when(
+                                  loading: () => const Center(child: CircularProgressIndicator()),
+                                  error: (err, _) => Center(child: Text('Error: $err')),
+                                  data: (sales) {
+                                    if (sales.isEmpty) {
+                                      return const Center(child: Text('Sin movimientos hoy.'));
+                                    }
+                                    return ListView.builder(
+                                      itemCount: sales.length,
+                                      itemBuilder: (context, index) => SaleTileItem(sale: sales[index]),
+                                    );
+                                  },
+                                ),
                               ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                    if (isAdmin)
-                      Consumer(
+                            ],
+                          );
+                        },
+                      )
+                    : Consumer(
+                        key: const ValueKey('gestion_personal'),
                         builder: (context, ref, _) {
                           final usersAsync = ref.watch(userControllerProvider);
                           return Column(
@@ -420,9 +640,9 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                                   icon: const Icon(Icons.person_add, size: 18),
                                   label: const Text('Nueva cuenta'),
                                   onPressed: () => showCreateUserDialog(
-                                    dialogContext,
+                                    context,
                                     ref,
-                                    currentOperatorRole: userRole,
+                                    currentOperatorRole: widget.userRole,
                                   ),
                                 ),
                               ),
@@ -460,13 +680,11 @@ void showSalesReportDialog(BuildContext context, WidgetRef ref) async {
                           );
                         },
                       ),
-                  ],
-                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
-    ),
-  );
+    );
+  }
 }

@@ -12,13 +12,22 @@ class BarcodeScannerScreen extends StatefulWidget {
   State<BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
 }
 
-class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
+class _BarcodeScannerScreenState extends State<BarcodeScannerScreen>
+    with SingleTickerProviderStateMixin {
   // CORREGIDO: antes el controller no tenía ninguna configuración, así que
   // mobile_scanner analizaba TODA la imagen de la cámara (incluyendo zonas
   // fuera de foco) sin límite de formatos ni de velocidad, y eso es lo que
   // se sentía como "falla mucho". Ahora se limita a los formatos de barras
   // que realmente usa un POS y se activa el modo "sin duplicados" para que
   // no se dispare el mismo código 10 veces por segundo.
+  //
+  // MEJORADO: la mayoría de fallas de lectura NO son por el tamaño del
+  // recuadro sino por resolución de cámara baja (la imagen llega borrosa a
+  // ML Kit) y por no acercarse automáticamente a códigos chicos o lejanos.
+  // `cameraResolution` pide una resolución alta a la cámara (no siempre se
+  // obtiene exacta, pero sube el techo) y `autoZoom` hace zoom digital solo
+  // cuando detecta un código muy pequeño dentro del cuadro, sin que el
+  // cajero tenga que acercar el celular a mano.
   final MobileScannerController _controller = MobileScannerController(
     detectionSpeed: DetectionSpeed.noDuplicates,
     formats: const [
@@ -31,7 +40,16 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     ],
     facing: CameraFacing.back,
     torchEnabled: false,
+    cameraResolution: const Size(1920, 1080),
+    autoZoom: true,
   );
+
+  // NUEVO: animación de la línea láser roja, para que el cajero vea
+  // exactamente el "barrido" de lectura, como en los lectores dedicados.
+  late final AnimationController _laserController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  )..repeat(reverse: true);
 
   bool _handled = false; // evita procesar el mismo código varias veces seguidas
   bool _torchOn = false;
@@ -67,6 +85,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    _laserController.dispose();
     super.dispose();
   }
 
@@ -137,6 +156,45 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                 painter: _ScannerOverlayPainter(scanWindow),
               ),
             ),
+          ),
+          // NUEVO: línea láser roja que sube y baja dentro del recuadro,
+          // como un lector láser de verdad. Es puramente visual (la lectura
+          // real la sigue haciendo ML Kit sobre el scanWindow completo), pero
+          // ayuda a que el cajero centre y sostenga el código quieto en el
+          // punto correcto, que es la causa más común de "no lo detecta".
+          AnimatedBuilder(
+            animation: _laserController,
+            builder: (context, _) {
+              final y = scanWindow.top +
+                  8 +
+                  (scanWindow.height - 16) * _laserController.value;
+              return Positioned(
+                left: scanWindow.left + 10,
+                right: screenSize.width - scanWindow.right + 10,
+                top: y,
+                child: IgnorePointer(
+                  child: Container(
+                    height: 2.4,
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent,
+                      borderRadius: BorderRadius.circular(2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.redAccent.withValues(alpha: 0.85),
+                          blurRadius: 8,
+                          spreadRadius: 1.5,
+                        ),
+                        BoxShadow(
+                          color: Colors.red.withValues(alpha: 0.5),
+                          blurRadius: 16,
+                          spreadRadius: 3,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
           Positioned(
             bottom: 40,

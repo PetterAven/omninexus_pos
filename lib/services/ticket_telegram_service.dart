@@ -3,8 +3,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import '../core/utils/currency_to_words.dart';
 
-/// Envía el comprobante de una venta al chat de Telegram vinculado (o al
-/// chat general de la tienda si no hay cliente vinculado).
+/// Envía el comprobante de una venta al chat de Telegram del cliente
+/// vinculado en esa venta. Vincular Telegram es opcional: si nadie se
+/// vinculó, este servicio ni siquiera se llama (ver checkout_controller.dart),
+/// así que ya no existe un "chat de respaldo" fijo al que le lleguen todos
+/// los tickets no vinculados.
 ///
 /// Refactorizado para usar variables de entorno vía `flutter_dotenv` 
 /// evitando la exposición de tokens y claves en el repositorio.
@@ -12,21 +15,29 @@ class TicketTelegramService {
   static final TicketTelegramService instance = TicketTelegramService._init();
   TicketTelegramService._init();
 
-  // Obtiene los valores desde el archivo .env con valores por defecto seguros
+  // Obtiene el token desde el archivo .env con valor por defecto seguro
   String get _botToken => dotenv.env['TELEGRAM_BOT_TOKEN'] ?? '';
-  String get _fallbackChatId => dotenv.env['TELEGRAM_CHAT_ID'] ?? '';
 
   /// Devuelve `null` si el envío fue exitoso (HTTP 200), o un mensaje de
   /// error legible para mostrar en un SnackBar si algo falló.
+  ///
+  /// `linkedChatId` es obligatorio en la práctica: este método solo debe
+  /// llamarse cuando el cliente ya se vinculó con su código de 4 dígitos.
   Future<String?> sendReceipt(
     List<Map<String, dynamic>> items,
     double total,
     double received,
     double change, {
     bool isCard = false,
-    String? linkedChatId,
+    required String? linkedChatId,
     String? linkedUsername,
   }) async {
+    if (linkedChatId == null || linkedChatId.isEmpty) {
+      // No debería llegar aquí (el checkout_controller ya filtra esto),
+      // pero por seguridad no se manda nada si no hay un chat de destino.
+      return null;
+    }
+
     if (_botToken.isEmpty || _botToken.startsWith('TU_')) {
       debugPrint('⚠️ Token de Telegram no configurado en .env');
       return '⚠️ No se configuró el token de Telegram en el archivo .env';
@@ -79,16 +90,11 @@ class TicketTelegramService {
     buffer.writeln('`--------------------------------------`');
     buffer.writeln('¡Venta realizada con éxito!');
 
-    final destinoChatId = linkedChatId ?? _fallbackChatId;
-    if (destinoChatId.isEmpty) {
-      return '⚠️ No hay un Chat ID de destino configurado para Telegram.';
-    }
-
     final url = Uri.parse('https://api.telegram.org/bot$_botToken/sendMessage');
 
     try {
       final response = await http.post(url, body: {
-        'chat_id': destinoChatId,
+        'chat_id': linkedChatId,
         'text': buffer.toString(),
         'parse_mode': 'Markdown',
       });

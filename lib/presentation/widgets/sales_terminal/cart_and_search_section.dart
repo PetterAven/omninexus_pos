@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../data/repositories/product_repository.dart';
-import '../../../domain/entities/product.dart';
-import '../../providers/cart_controller.dart';
+
+import 'package:omninexus_pos/domain/entities/product.dart';
+import 'package:omninexus_pos/data/repositories/product_repository.dart';
+import 'package:omninexus_pos/presentation/providers/cart_controller.dart';
 
 class CartAndSearchSection extends ConsumerStatefulWidget {
   final bool expandCart;
@@ -25,177 +27,91 @@ class _CartAndSearchSectionState extends ConsumerState<CartAndSearchSection> {
   final FocusNode _focusNode = FocusNode();
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
-
   List<Product> _searchResults = [];
   bool _isLoading = false;
+  Timer? _debounceTimer;
 
   @override
   void initState() {
     super.initState();
-    widget.searchController.addListener(_onSearchChanged);
-  }
-
-  void _onSearchChanged() async {
-    final query = widget.searchController.text.trim();
-
-    if (query.isEmpty) {
-      _hideOverlay();
-      if (mounted) {
-        setState(() {
-          _searchResults = [];
-        });
+    _focusNode.addListener(() {
+      if (!_focusNode.hasFocus) {
+        _hideOverlay();
       }
-      return;
-    }
-
-    final results = await ProductRepository.instance.searchProducts(query);
-
-    if (!mounted) return;
-
-    // Si coincide exactamente con el código de barras al escanear rápido
-    final exactMatch = results.where((p) => p.code == query).firstOrNull;
-    if (exactMatch != null) {
-      _hideOverlay();
-      widget.searchController.clear();
-      _focusNode.unfocus();
-      await _addProductToCart(exactMatch);
-      return;
-    }
-
-    setState(() {
-      _searchResults = results;
-      _isLoading = false;
     });
-
-    _showOverlay();
   }
 
-  /// Procesa la adición de productos al carrito (por pieza o con popup para granel)
-  Future<void> _addProductToCart(Product product) async {
-    double quantity = 1.0;
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    _hideOverlay();
+    _focusNode.dispose();
+    super.dispose();
+  }
 
-    // Si el producto está registrado a granel, se abre el diálogo de cantidad
-    if (product.isWeighted) {
-      final double? enteredQuantity =
-          await _showBulkQuantityDialog(context, product);
+  void _hideOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+  }
 
-      // Si el usuario cancela o deja vacío, se aborta la acción
-      if (enteredQuantity == null || enteredQuantity <= 0) {
-        return;
+  void _onSearchChanged(String query) {
+    _debounceTimer?.cancel();
+
+    if (query.trim().isEmpty) {
+      _hideOverlay();
+      setState(() {
+        _searchResults = [];
+        _isLoading = false;
+      });
+      return;
+    }
+
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      setState(() => _isLoading = true);
+
+      try {
+        final results = await ProductRepository.instance.searchProducts(query);
+
+        Product? exactMatch;
+        for (final product in results) {
+          if (product.code == query.trim()) {
+            exactMatch = product;
+            break;
+          }
+        }
+
+        if (exactMatch != null) {
+          _hideOverlay();
+          widget.searchController.clear();
+          _focusNode.unfocus();
+          await _addProductToCart(exactMatch);
+          return;
+        }
+
+        _searchResults = results;
+        if (_focusNode.hasFocus && _searchResults.isNotEmpty) {
+          _showOverlay();
+        } else {
+          _hideOverlay();
+        }
+      } catch (e) {
+        debugPrint('Error en la búsqueda: $e');
+      } finally {
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
       }
-      quantity = enteredQuantity;
-    }
-
-    // Llamada corregida usando el parámetro nombrado 'quantity'
-    final result = ref.read(cartControllerProvider.notifier).addProduct(
-          product,
-          quantity: quantity,
-        );
-
-    if (!mounted) return;
-
-    if (result == CartOperationResult.outOfStock) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Sin stock suficiente para ${product.name}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } else if (result == CartOperationResult.invalidWeight) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cantidad o peso no válido'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-    }
-  }
-
-  /// Pop-up emergente para ingresar la cantidad exacta (kilos, litros, gramos, etc.)
-  Future<double?> _showBulkQuantityDialog(
-      BuildContext context, Product product,
-      {double? initialValue}) async {
-    final controller =
-        TextEditingController(text: initialValue?.toString() ?? '');
-    final unitLabel = product.unit.isNotEmpty ? product.unit : 'kg';
-
-    return showDialog<double>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            const Icon(Icons.scale, color: Colors.blue),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Venta a granel: ${product.name}',
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Precio por $unitLabel: \$${product.price.toStringAsFixed(2)}',
-              style: TextStyle(color: Colors.grey[700]),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Ingresa la cantidad ($unitLabel)',
-                hintText: 'Ej. 0.250 o 1.5',
-                suffixText: unitLabel,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onSubmitted: (value) {
-                final val = double.tryParse(value);
-                Navigator.pop(dialogCtx, val);
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, null),
-            child:
-                const Text('Cancelar', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            onPressed: () {
-              final val = double.tryParse(controller.text);
-              Navigator.pop(dialogCtx, val);
-            },
-            child: const Text('Agregar al Carrito'),
-          ),
-        ],
-      ),
-    );
+    });
   }
 
   void _showOverlay() {
     _hideOverlay();
 
+    if (_searchResults.isEmpty) return;
+
     final renderBox = context.findRenderObject() as RenderBox?;
     if (renderBox == null) return;
+
     final size = renderBox.size;
 
     _overlayEntry = OverlayEntry(
@@ -204,114 +120,54 @@ class _CartAndSearchSectionState extends ConsumerState<CartAndSearchSection> {
         child: CompositedTransformFollower(
           link: _layerLink,
           showWhenUnlinked: false,
-          offset: const Offset(0.0, 52.0),
+          offset: const Offset(0, 60),
           child: Material(
             elevation: 8,
-            borderRadius: BorderRadius.circular(16),
-            color: Theme.of(context).colorScheme.surface,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                constraints: const BoxConstraints(maxHeight: 300),
-                child: _isLoading
-                    ? const Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    : _searchResults.isEmpty
-                        ? const Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Text('Sin resultados.'),
-                          )
-                        : ListView.separated(
-                            shrinkWrap: true,
-                            itemCount: _searchResults.length,
-                            separatorBuilder: (_, __) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final product = _searchResults[index];
-                              return InkWell(
-                                onTap: () {
-                                  _hideOverlay();
-                                  widget.searchController.clear();
-                                  _focusNode.unfocus();
-                                  _addProductToCart(product);
-                                },
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16.0,
-                                    vertical: 12.0,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Text(
-                                                  product.name,
-                                                  style: const TextStyle(
-                                                    fontWeight:
-                                                        FontWeight.bold,
-                                                    fontSize: 15,
-                                                  ),
-                                                ),
-                                                if (product.isWeighted) ...[
-                                                  const SizedBox(width: 6),
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                            horizontal: 6,
-                                                            vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color:
-                                                          Colors.orange[100],
-                                                      borderRadius:
-                                                          BorderRadius
-                                                              .circular(4),
-                                                    ),
-                                                    child: Text(
-                                                      'Granel (${product.unit})',
-                                                      style: TextStyle(
-                                                        color:
-                                                            Colors.orange[900],
-                                                        fontSize: 10,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ]
-                                              ],
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              'Cód: ${product.code} | Stock: ${product.stock} ${product.unit}',
-                                              style: TextStyle(
-                                                color: Colors.grey[600],
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Text(
-                                        '\$${product.price.toStringAsFixed(2)} / ${product.unit}',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 15,
-                                          color: Colors.green,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
+            borderRadius: BorderRadius.circular(12),
+            color: Colors.white,
+            child: Container(
+              constraints: const BoxConstraints(maxHeight: 280),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: _searchResults.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final product = _searchResults[index];
+                  final stockText = product.isWeighted
+                      ? product.stock.toStringAsFixed(3)
+                      : product.stock.toInt().toString();
+
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (_) {
+                      _hideOverlay();
+                      widget.searchController.clear();
+                      _focusNode.unfocus();
+                      _addProductToCart(product);
+                    },
+                    child: ListTile(
+                      dense: true,
+                      title: Text(
+                        product.name,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                          'Código: ${product.code} | Stock: $stockText ${product.unit}'),
+                      trailing: Text(
+                        '\$${product.price.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ),
@@ -322,189 +178,316 @@ class _CartAndSearchSectionState extends ConsumerState<CartAndSearchSection> {
     Overlay.of(context).insert(_overlayEntry!);
   }
 
-  void _hideOverlay() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
+  Future<void> _addProductToCart(Product product) async {
+    double? quantity;
+
+    if (product.isWeighted) {
+      quantity = await _showBulkQuantityDialog(context, product);
+      if (quantity == null || quantity <= 0) return;
+    }
+
+    final result = ref.read(cartControllerProvider.notifier).addProduct(
+          product,
+          weight: product.isWeighted ? quantity : null,
+        );
+
+    if (!mounted) return;
+
+    _showResultSnackBar(result, product.name);
   }
 
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    _hideOverlay();
-    super.dispose();
+  void _showResultSnackBar(CartOperationResult result, String productName) {
+    switch (result) {
+      case CartOperationResult.success:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ $productName actualizado'),
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+        break;
+      case CartOperationResult.outOfStock:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Este producto no tiene stock disponible.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        break;
+      case CartOperationResult.noMoreStock:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay más stock disponible para este producto.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        break;
+      case CartOperationResult.invalidWeight:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('El peso o cantidad ingresada no es válida.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        break;
+      case CartOperationResult.notApplicableForWeighted:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Este producto se vende por peso. Ajusta la cantidad correctamente.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        break;
+    }
+  }
+
+  Future<double?> _showBulkQuantityDialog(
+      BuildContext context, Product product, {double? initialQuantity}) async {
+    final controller = TextEditingController(
+      text: initialQuantity != null ? initialQuantity.toStringAsFixed(3) : '',
+    );
+    return showDialog<double>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Ingresar cantidad/peso (${product.unit})'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Producto: ${product.name}'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: controller,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Cantidad o peso en ${product.unit}',
+                hintText: 'Ej: 0.500 o 1.250',
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final val =
+                  double.tryParse(controller.text.replaceAll(',', '.'));
+              Navigator.pop(context, val);
+            },
+            child: const Text('Aceptar'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final cartItems = ref.watch(cartControllerProvider);
 
-    return Container(
+    final Widget cartListWidget = cartItems.isEmpty
+        ? const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.shopping_cart_outlined,
+                    size: 64, color: Colors.grey),
+                SizedBox(height: 12),
+                Text(
+                  'El carrito está vacío',
+                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                ),
+              ],
+            ),
+          )
+        : ListView.separated(
+            itemCount: cartItems.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final item = cartItems[index];
+              final isWeighted = item.product.isWeighted;
+
+              final qtyDisplay = isWeighted
+                  ? item.quantity.toStringAsFixed(3)
+                  : item.quantity.toInt().toString();
+
+              final double itemTotal = item.quantity * item.product.price;
+
+              return ListTile(
+                title: Text(
+                  item.product.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  '\$${item.product.price.toStringAsFixed(2)} c/u | Total: \$${itemTotal.toStringAsFixed(2)}',
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // --- BOTÓN DISMINUIR (-) ---
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline,
+                          color: Colors.orange),
+                      onPressed: () async {
+                        if (isWeighted) {
+                          final newQty = await _showBulkQuantityDialog(
+                            context,
+                            item.product,
+                            initialQuantity: item.quantity,
+                          );
+                          if (newQty != null) {
+                            if (newQty <= 0) {
+                              ref
+                                  .read(cartControllerProvider.notifier)
+                                  .removeItem(index);
+                            } else {
+                              ref
+                                  .read(cartControllerProvider.notifier)
+                                  .updateQuantity(index, newQty);
+                            }
+                          }
+                        } else {
+                          if (item.quantity > 1) {
+                            ref
+                                .read(cartControllerProvider.notifier)
+                                .updateQuantity(index, item.quantity - 1);
+                          } else {
+                            ref
+                                .read(cartControllerProvider.notifier)
+                                .removeItem(index);
+                          }
+                        }
+                      },
+                    ),
+
+                    // --- CANTIDAD ACTUAL ---
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '$qtyDisplay ${item.product.unit}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+
+                    // --- BOTÓN AUMENTAR (+) ---
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline,
+                          color: Colors.green),
+                      onPressed: () async {
+                        if (isWeighted) {
+                          final newQty = await _showBulkQuantityDialog(
+                            context,
+                            item.product,
+                            initialQuantity: item.quantity,
+                          );
+                          if (newQty != null && newQty > 0) {
+                            ref
+                                .read(cartControllerProvider.notifier)
+                                .updateQuantity(index, newQty);
+                          }
+                        } else {
+                          final result = ref
+                              .read(cartControllerProvider.notifier)
+                              .addProduct(item.product);
+                          _showResultSnackBar(result, item.product.name);
+                        }
+                      },
+                    ),
+
+                    const SizedBox(width: 4),
+
+                    // --- BOTÓN ELIMINAR ---
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: () {
+                        ref
+                            .read(cartControllerProvider.notifier)
+                            .removeItem(index);
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+
+    return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         children: [
-          // Campo de búsqueda con Overlay
           CompositedTransformTarget(
             link: _layerLink,
             child: TextField(
               controller: widget.searchController,
               focusNode: _focusNode,
+              onChanged: _onSearchChanged,
               decoration: InputDecoration(
                 hintText: 'Buscar producto por nombre o código...',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (widget.searchController.text.isNotEmpty)
-                      IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          widget.searchController.clear();
-                          _hideOverlay();
-                        },
+                    if (_isLoading)
+                      const Padding(
+                        padding: EdgeInsets.all(12.0),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                       ),
                     IconButton(
                       icon: const Icon(Icons.qr_code_scanner),
-                      tooltip: 'Escanear código de barras',
                       onPressed: widget.onScanBarcode,
+                      tooltip: 'Escanear código de barras',
                     ),
                   ],
                 ),
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
                 ),
+                filled: true,
+                fillColor: Colors.white,
               ),
             ),
           ),
           const SizedBox(height: 16),
-
-          // Renderizado de ítems en el carrito
-          Expanded(
-            flex: widget.expandCart ? 1 : 0,
-            child: cartItems.isEmpty
-                ? const Center(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 32.0),
-                      child: Text(
-                        'El carrito está vacío.',
-                        style: TextStyle(color: Colors.grey, fontSize: 16),
-                      ),
+          widget.expandCart
+              ? Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade300),
                     ),
-                  )
-                : ListView.builder(
-                    shrinkWrap: !widget.expandCart,
-                    itemCount: cartItems.length,
-                    itemBuilder: (context, index) {
-                      final item = cartItems[index];
-                      final unitLabel = item.product.unit.isNotEmpty
-                          ? item.product.unit
-                          : 'pza';
-
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8.0),
-                        child: ListTile(
-                          title: Text(item.product.name),
-                          subtitle: Text(
-                            item.product.isWeighted
-                                ? '${item.quantity.toStringAsFixed(3)} $unitLabel x \$${item.product.price.toStringAsFixed(2)}'
-                                : '${item.quantity.toInt()} $unitLabel x \$${item.product.price.toStringAsFixed(2)}',
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Producto a granel: no tiene sentido picarle "+" de 1 en 1 kg,
-                              // así que aquí se reabre el diálogo de peso para editarlo.
-                              if (item.product.isWeighted)
-                                IconButton(
-                                  icon: const Icon(Icons.edit,
-                                      color: Colors.blue, size: 20),
-                                  tooltip: 'Editar cantidad',
-                                  onPressed: () async {
-                                    final nuevaCantidad =
-                                        await _showBulkQuantityDialog(
-                                      context,
-                                      item.product,
-                                      initialValue: item.quantity,
-                                    );
-                                    if (nuevaCantidad != null &&
-                                        nuevaCantidad > 0) {
-                                      ref
-                                          .read(
-                                              cartControllerProvider.notifier)
-                                          .updateQuantity(
-                                              index, nuevaCantidad);
-                                    }
-                                  },
-                                )
-                              else ...[
-                                IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline,
-                                      color: Colors.redAccent, size: 22),
-                                  onPressed: () {
-                                    ref
-                                        .read(cartControllerProvider.notifier)
-                                        .decreaseQuantity(index);
-                                  },
-                                ),
-                                Text(
-                                  item.quantity.toInt().toString(),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.add_circle_outline,
-                                      color: Colors.green, size: 22),
-                                  onPressed: () {
-                                    final result = ref
-                                        .read(cartControllerProvider.notifier)
-                                        .increaseQuantity(index);
-                                    if (result ==
-                                        CartOperationResult.noMoreStock) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                              'Sin más stock disponible de ${item.product.name}'),
-                                          backgroundColor: Colors.orange,
-                                        ),
-                                      );
-                                    }
-                                  },
-                                ),
-                              ],
-                              const SizedBox(width: 8),
-                              Text(
-                                '\$${item.subtotal.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              IconButton(
-                                icon:
-                                    const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () {
-                                  ref
-                                      .read(cartControllerProvider.notifier)
-                                      .removeItem(index);
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
+                    child: cartListWidget,
                   ),
-          ),
+                )
+              : Container(
+                  height: 350,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: cartListWidget,
+                ),
         ],
       ),
     );

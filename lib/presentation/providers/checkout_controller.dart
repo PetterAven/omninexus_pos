@@ -98,15 +98,23 @@ class CheckoutController extends AsyncNotifier<void> {
 
       ref.invalidate(salesControllerProvider);
 
-      final telegramError = await TicketTelegramService.instance.sendReceipt(
-        ticketItems,
-        total,
-        cashReceived,
-        change,
-        isCard: isCard,
-        linkedChatId: linkedChatId,
-        linkedUsername: linkedUsername,
-      );
+      // Solo se manda por Telegram si el cliente vinculó su cuenta con el
+      // código de 4 dígitos en ESTA venta. Vincular Telegram es opcional
+      // (no todos los clientes quieren instalarlo), así que si nadie se
+      // vinculó, simplemente no se manda nada por ahí: el comprobante en
+      // PDF/impreso de abajo sigue generándose igual.
+      String? telegramError;
+      if (linkedChatId != null && linkedChatId.isNotEmpty) {
+        telegramError = await TicketTelegramService.instance.sendReceipt(
+          ticketItems,
+          total,
+          cashReceived,
+          change,
+          isCard: isCard,
+          linkedChatId: linkedChatId,
+          linkedUsername: linkedUsername,
+        );
+      }
 
       await TicketPdfService.instance.printReceipt(
         ticketItems,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../domain/entities/product.dart';
 import '../../providers/cart_controller.dart';
 
@@ -29,7 +30,7 @@ void showRechargeDialog(BuildContext context, WidgetRef ref) {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               DropdownButtonFormField<String>(
-                initialValue: selectedCompany,
+                initialValue: selectedCompany, // CAMBIO AQUÍ: 'initialValue' en lugar de 'value'
                 decoration: const InputDecoration(labelText: 'Compañía'),
                 items: kRechargeCompanies
                     .map((c) => DropdownMenuItem(value: c, child: Text(c)))
@@ -79,30 +80,38 @@ void showRechargeDialog(BuildContext context, WidgetRef ref) {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () {
               final phone = phoneController.text.trim();
               final amount = double.tryParse(amountController.text.trim());
 
               if (phone.length != 10 || int.tryParse(phone) == null) {
                 ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(content: Text('El número debe tener exactamente 10 dígitos.'), backgroundColor: Colors.red),
+                  const SnackBar(
+                    content: Text('El número debe tener exactamente 10 dígitos.'),
+                    backgroundColor: Colors.red,
+                  ),
                 );
                 return;
               }
               if (amount == null || amount <= 0) {
                 ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(content: Text('Ingresa un monto válido.'), backgroundColor: Colors.red),
+                  const SnackBar(
+                    content: Text('Ingresa un monto válido.'),
+                    backgroundColor: Colors.red,
+                  ),
                 );
                 return;
               }
 
-              // Producto sintético: no se guarda en el catálogo, solo viaja
-              // por el carrito para reusar todo el flujo de cobro/ticket
-              // que ya existe. El código es único por timestamp para no
-              // chocar con otra recarga en el mismo turno.
               final rechargeProduct = Product(
                 code: 'RECARGA-${DateTime.now().millisecondsSinceEpoch}',
                 name: 'Recarga $selectedCompany · $phone',
@@ -112,7 +121,7 @@ void showRechargeDialog(BuildContext context, WidgetRef ref) {
                 unit: 'Servicio',
               );
 
-              ref.read(cartControllerProvider.notifier).addProduct(rechargeProduct, quantity: 1);
+              ref.read(cartControllerProvider.notifier).addProduct(rechargeProduct);
               Navigator.pop(dialogContext);
             },
             child: const Text('Agregar al Carrito'),

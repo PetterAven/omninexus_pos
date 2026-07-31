@@ -339,7 +339,6 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
                   ),
                   const SizedBox(width: 6),
 
-                  // Botón Panel de Control: Abre directo el diálogo con pestañas (Imagen 2)
                   _AppBarPillButton(
                     icon: Icons.dashboard_outlined,
                     label: 'Panel de Control',
@@ -429,11 +428,11 @@ class _AppBarPillButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color resolvedIconColor = iconColor ?? Colors.white;
     final Color background = highlighted
-        ? Colors.white.withOpacity(0.16)
-        : Colors.white.withOpacity(0.06);
+        ? Colors.white.withValues(alpha: 0.16)
+        : Colors.white.withValues(alpha: 0.06);
     final Color border = highlighted
-        ? Colors.blue.shade300.withOpacity(0.6)
-        : Colors.white.withOpacity(0.14);
+        ? Colors.blue.shade300.withValues(alpha: 0.6)
+        : Colors.white.withValues(alpha: 0.14);
 
     return Material(
       color: background,
