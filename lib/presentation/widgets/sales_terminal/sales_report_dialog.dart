@@ -546,7 +546,7 @@ class _ControlPanelDialogState extends ConsumerState<_ControlPanelDialog> {
           Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(Icons.refresh, color: Colors.blueAccent),
                 tooltip: 'Sincronizar',
                 onPressed: () async {
                   await ref.read(salesControllerProvider.notifier).refresh();
@@ -556,7 +556,8 @@ class _ControlPanelDialogState extends ConsumerState<_ControlPanelDialog> {
                 },
               ),
               IconButton(
-                icon: const Icon(Icons.close),
+                icon: const Icon(Icons.close, color: Colors.redAccent),
+                tooltip: 'Cerrar',
                 onPressed: () => Navigator.pop(context),
               ),
             ],
@@ -609,10 +610,10 @@ class _ControlPanelDialogState extends ConsumerState<_ControlPanelDialog> {
                                   onPressed: sales.isEmpty ? null : () => exportSalesReport(context, sales),
                                 ),
                               ),
-                              Expanded(
-                                child: salesAsync.when(
-                                  loading: () => const Center(child: CircularProgressIndicator()),
-                                  error: (err, _) => Center(child: Text('Error: $err')),
+                               Expanded(
+                                 child: salesAsync.when(
+                                   loading: () => const SalesSkeletonLoader(),
+                                   error: (err, _) => Center(child: Text('Error: $err')),
                                   data: (sales) {
                                     if (sales.isEmpty) {
                                       return const Center(child: Text('Sin movimientos hoy.'));
@@ -647,9 +648,9 @@ class _ControlPanelDialogState extends ConsumerState<_ControlPanelDialog> {
                                 ),
                               ),
                               Expanded(
-                                child: usersAsync.when(
-                                  loading: () => const Center(child: CircularProgressIndicator()),
-                                  error: (err, _) => Center(child: Text('Error: $err')),
+                                  child: usersAsync.when(
+                                    loading: () => const SalesSkeletonLoader(),
+                                    error: (err, _) => Center(child: Text('Error: $err')),
                                   data: (users) {
                                     if (users.isEmpty) {
                                       return const Center(child: Text('No hay cuentas creadas.'));
@@ -685,6 +686,108 @@ class _ControlPanelDialogState extends ConsumerState<_ControlPanelDialog> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class SalesSkeletonLoader extends StatefulWidget {
+  const SalesSkeletonLoader({super.key});
+
+  @override
+  State<SalesSkeletonLoader> createState() => _SalesSkeletonLoaderState();
+}
+
+class _SalesSkeletonLoaderState extends State<SalesSkeletonLoader>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final opacity = 0.3 + (_controller.value * 0.4);
+        return ListView.builder(
+          itemCount: 4,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemBuilder: (context, index) {
+            return Container(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 4,
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withValues(alpha: opacity),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 140,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withValues(alpha: opacity),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          width: 90,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withValues(alpha: opacity * 0.7),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: 60,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withValues(alpha: opacity),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

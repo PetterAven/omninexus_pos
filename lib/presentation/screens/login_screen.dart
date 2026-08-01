@@ -31,7 +31,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   void _login() {
     final authState = ref.read(authControllerProvider);
-    if (authState.isLoading) return; // evita doble submit si mantienen Enter presionado
+    if (authState.isLoading)
+      return; // evita doble submit si mantienen Enter presionado
 
     final user = _usernameController.text.trim();
     final pass = _passwordController.text;
@@ -73,7 +74,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         );
       } else if (!wasLoading && next.hasError) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(next.error.toString().replaceFirst('Exception: ', ''))),
+          SnackBar(
+              content:
+                  Text(next.error.toString().replaceFirst('Exception: ', ''))),
         );
       }
     });
@@ -82,75 +85,143 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final isLoading = authState.isLoading;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF232D37),
-      body: Center(
-        // CORREGIDO: envolvemos todo en un Shortcuts/Actions para que
-        // Enter funcione sin importar en qué campo esté el foco.
-        child: Shortcuts(
-          shortcuts: <LogicalKeySet, Intent>{
-            LogicalKeySet(LogicalKeyboardKey.enter): const ActivateIntent(),
-            LogicalKeySet(LogicalKeyboardKey.numpadEnter): const ActivateIntent(),
-          },
-          child: Actions(
-            actions: <Type, Action<Intent>>{
-              ActivateIntent: CallbackAction<ActivateIntent>(
-                onInvoke: (intent) {
-                  _login();
-                  return null;
-                },
-              ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF334155)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Center(
+          // CORREGIDO: envolvemos todo en un Shortcuts/Actions para que
+          // Enter funcione sin importar en qué campo esté el foco.
+          child: Shortcuts(
+            shortcuts: <LogicalKeySet, Intent>{
+              LogicalKeySet(LogicalKeyboardKey.enter): const ActivateIntent(),
+              LogicalKeySet(LogicalKeyboardKey.numpadEnter):
+                  const ActivateIntent(),
             },
-            child: Focus(
-              autofocus: true,
-              child: Container(
-                width: 400,
-                padding: const EdgeInsets.all(24.0),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
+            child: Actions(
+              actions: <Type, Action<Intent>>{
+                ActivateIntent: CallbackAction<ActivateIntent>(
+                  onInvoke: (intent) {
+                    _login();
+                    return null;
+                  },
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('OMNINEXUS POS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF232D37))),
-                    const SizedBox(height: 20),
-                    TextField(
-                      controller: _usernameController,
-                      focusNode: _usernameFocus,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(labelText: 'Usuario', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
-                      // CORREGIDO: Enter en 'Usuario' salta directo a 'Contraseña'
-                      onSubmitted: (_) => FocusScope.of(context).requestFocus(_passwordFocus),
-                    ),
-                    const SizedBox(height: 15),
-                    TextField(
-                      controller: _passwordController,
-                      focusNode: _passwordFocus,
-                      obscureText: true,
-                      textInputAction: TextInputAction.done,
-                      decoration: const InputDecoration(labelText: 'Contraseña', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock)),
-                      // CORREGIDO: Enter en 'Contraseña' entra directo, como pediste
-                      onSubmitted: (_) => _login(),
-                    ),
-                    const SizedBox(height: 20),
-                    isLoading
-                        ? const CircularProgressIndicator()
-                        : SizedBox(
-                            width: double.infinity,
-                            height: 50,
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF232D37)),
-                              onPressed: _login,
-                              child: const Text('Ingresar', style: TextStyle(color: Colors.white, fontSize: 16)),
+              },
+              child: Focus(
+                autofocus: true,
+                child: Container(
+                  width: 420,
+                  padding: const EdgeInsets.all(32.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.25),
+                        blurRadius: 24,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.point_of_sale_rounded,
+                          size: 48,
+                          color: Color(0xFF6366F1),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      const Text(
+                        'OMNINEXUS POS',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F172A),
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Sistema de Punto de Venta Inteligente',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      TextField(
+                        controller: _usernameController,
+                        focusNode: _usernameFocus,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Usuario',
+                          prefixIcon: Icon(Icons.person_outline,
+                              color: Color(0xFF64748B)),
+                        ),
+                        // CORREGIDO: Enter en 'Usuario' salta directo a 'Contraseña'
+                        onSubmitted: (_) =>
+                            FocusScope.of(context).requestFocus(_passwordFocus),
+                      ),
+                      const SizedBox(height: 18),
+                      TextField(
+                        controller: _passwordController,
+                        focusNode: _passwordFocus,
+                        obscureText: true,
+                        textInputAction: TextInputAction.done,
+                        decoration: const InputDecoration(
+                          labelText: 'Contraseña',
+                          prefixIcon: Icon(Icons.lock_outline,
+                              color: Color(0xFF64748B)),
+                        ),
+                        // CORREGIDO: Enter en 'Contraseña' entra directo, como pediste
+                        onSubmitted: (_) => _login(),
+                      ),
+                      const SizedBox(height: 24),
+                      isLoading
+                          ? const CircularProgressIndicator(
+                              color: Color(0xFF6366F1))
+                          : SizedBox(
+                              width: double.infinity,
+                              height: 52,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0F172A),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: _login,
+                                child: const Text(
+                                  'Ingresar',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                    const SizedBox(height: 15),
-                    const Text(
-                      '¿No tienes cuenta? Pídele a tu Administrador que la cree desde Gestión de Personal.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.blueGrey, fontSize: 12),
-                    )
-                  ],
+                      const SizedBox(height: 20),
+                      const Text(
+                        '¿No tienes cuenta? Pídele a tu Administrador que la cree desde Gestión de Personal.',
+                        textAlign: TextAlign.center,
+                        style:
+                            TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                      )
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -312,7 +312,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
-            icon: const Icon(Icons.sync_alt),
+            icon: const Icon(Icons.sync_alt, color: Colors.blueAccent),
             tooltip: 'Código de sincronización (teléfono ↔ PC)',
             onPressed: _showSyncCodeDialog,
           ),
@@ -367,7 +367,7 @@ class _SalesTerminalScreenState extends ConsumerState<SalesTerminalScreen> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout, color: Colors.redAccent),
             tooltip: 'Cerrar sesión',
             onPressed: _confirmLogout,
           ),

@@ -23,7 +23,7 @@ Future<void> showSyncCodeDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Row(
         children: [
-          Icon(Icons.sync_alt, color: Color(0xFF232D37)),
+          Icon(Icons.sync_alt, color: Colors.blueAccent),
           SizedBox(width: 10),
           Text('Código de Sincronización', style: TextStyle(fontWeight: FontWeight.bold)),
         ],

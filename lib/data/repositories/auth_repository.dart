@@ -42,20 +42,30 @@ class AuthRepository {
   Future<AppUser?> loginUser(String username, String password) async {
     AppUser? user;
 
+    // 1. Búsqueda local primero (instantánea, 0ms de espera)
     try {
-      final cloudUser = await _supabase
-          .from('users')
-          .select()
-          .eq('username', username)
-          .maybeSingle()
-          .timeout(AppConstants.networkTimeout);
-      if (cloudUser != null) user = AppUser.fromMap(Map<String, dynamic>.from(cloudUser));
-    } catch (_) {}
-
-    if (user == null) {
       final db = await AppDatabase.instance.database;
       final maps = await db.query('users', where: 'username = ?', whereArgs: [username]);
-      if (maps.isNotEmpty) user = AppUser.fromMap(maps.first);
+      if (maps.isNotEmpty) {
+        user = AppUser.fromMap(maps.first);
+      }
+    } catch (_) {}
+
+    // 2. Si no está local, buscar en la nube con timeout corto
+    if (user == null) {
+      try {
+        final cloudUser = await _supabase
+            .from('users')
+            .select()
+            .eq('username', username)
+            .maybeSingle()
+            .timeout(const Duration(seconds: 2));
+        if (cloudUser != null) {
+          user = AppUser.fromMap(Map<String, dynamic>.from(cloudUser));
+          final db = await AppDatabase.instance.database;
+          await db.insert('users', user.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      } catch (_) {}
     }
 
     if (user == null) return null;
