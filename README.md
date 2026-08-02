@@ -1,22 +1,27 @@
 # 🛒 Omninexus POS
 
-Sistema de Punto de Venta (POS) multiplataforma desarrollado en **Flutter**, diseñado bajo principios de **Clean Architecture**, resiliencia **Offline-First** y sincronización en tiempo real.
+Sistema de Punto de Venta (POS) multiplataforma desarrollado en **Flutter**.  
+Soporta ventas offline, sincronización con Supabase y está estructurado con **Clean Architecture**.
 
----
+## Características
 
-## 🏛️ Arquitectura del Sistema
+- Ventas offline con SQLite
+- Sincronización automática cuando hay conexión
+- Arquitectura limpia (Domain / Data / Presentation)
+- Multiplataforma (Android, iOS, Web, Desktop)
+- Integración con Supabase
 
-El proyecto sigue una arquitectura limpia en capas desacopladas, lo que garantiza testabilidad, escalabilidad y mantenibilidad.
+## Arquitectura
 
 ```text
 lib/
- ├── core/                  # Constantes globales, temas y sincronización de estado
- ├── data/                  # Fuentes de datos y repositorios concretos
- │   ├── datasources/local/ # Persistencia SQLite (app_database.dart)
- │   └── repositories/      # Implementaciones con fallback offline (Supabase + SQLite)
- ├── domain/                # Lógica de negocio e interfaces
- │   ├── entities/          # Product, Sale, SaleDetail, AppUser
- │   └── repositories/      # Contratos (Interfaces abstractas)
- ├── presentation/          # Capa de interfaz de usuario (Pantallas y Widgets)
- ├── services/              # Integraciones externas (Telegram, Supabase Client)
- └── main.dart              # Punto de entrada
+ ├── core/                  # Constantes, temas y estado global
+ ├── data/                  # Datasources y repositorios
+ │   ├── datasources/local/
+ │   └── repositories/
+ ├── domain/                # Entidades y contratos
+ │   ├── entities/
+ │   └── repositories/
+ ├── presentation/          # UI (pantallas y widgets)
+ ├── services/              # Supabase, Telegram, etc.
+ └── main.dart
